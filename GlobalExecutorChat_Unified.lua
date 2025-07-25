@@ -5480,10 +5480,400 @@ function GlobalChat:StartSetupProcess(loadingGui)
         loadingGui:Destroy()
         self:LoadChatInterface(existingConfig)
     else
-        -- Start authentication flow
+        -- Start setup flow: Platform → Country → Language → Authentication
         loadingGui:Destroy()
-        self:ShowAuthenticationScreen()
+        self:ShowPlatformSelection()
     end
+end
+
+--- Show platform selection screen
+function GlobalChat:ShowPlatformSelection()
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "GlobalChatPlatformSelection"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+
+    -- Main container
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Name = "PlatformContainer"
+    mainFrame.Size = UDim2.new(0, 500, 0, 400)
+    mainFrame.Position = UDim2.new(0.5, -250, 0.5, -200)
+    mainFrame.BackgroundColor3 = ThemeManager:GetCurrentTheme().primary
+    mainFrame.BorderSizePixel = 0
+    mainFrame.Parent = screenGui
+
+    -- Add corner radius
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 12)
+    corner.Parent = mainFrame
+
+    -- Title
+    local title = Instance.new("TextLabel")
+    title.Name = "Title"
+    title.Size = UDim2.new(1, 0, 0, 80)
+    title.Position = UDim2.new(0, 0, 0, 0)
+    title.BackgroundTransparency = 1
+    title.Text = "Global Executor Chat"
+    title.TextColor3 = ThemeManager:GetCurrentTheme().text
+    title.TextSize = 28
+    title.Font = Enum.Font.GothamBold
+    title.TextXAlignment = Enum.TextXAlignment.Center
+    title.Parent = mainFrame
+
+    -- Subtitle
+    local subtitle = Instance.new("TextLabel")
+    subtitle.Name = "Subtitle"
+    subtitle.Size = UDim2.new(1, 0, 0, 40)
+    subtitle.Position = UDim2.new(0, 0, 0, 70)
+    subtitle.BackgroundTransparency = 1
+    subtitle.Text = "What device are you using?"
+    subtitle.TextColor3 = ThemeManager:GetCurrentTheme().textMuted
+    subtitle.TextSize = 18
+    subtitle.Font = Enum.Font.Gotham
+    subtitle.TextXAlignment = Enum.TextXAlignment.Center
+    subtitle.Parent = mainFrame
+
+    -- Mobile button
+    local mobileButton = Instance.new("TextButton")
+    mobileButton.Name = "MobileButton"
+    mobileButton.Size = UDim2.new(0, 200, 0, 80)
+    mobileButton.Position = UDim2.new(0.5, -100, 0, 140)
+    mobileButton.BackgroundColor3 = ThemeManager:GetCurrentTheme().secondary
+    mobileButton.BorderSizePixel = 1
+    mobileButton.BorderColor3 = ThemeManager:GetCurrentTheme().accent
+    mobileButton.Text = "📱 Mobile"
+    mobileButton.TextColor3 = ThemeManager:GetCurrentTheme().text
+    mobileButton.TextSize = 20
+    mobileButton.Font = Enum.Font.GothamBold
+    mobileButton.Parent = mainFrame
+
+    local mobileCorner = Instance.new("UICorner")
+    mobileCorner.CornerRadius = UDim.new(0, 8)
+    mobileCorner.Parent = mobileButton
+
+    -- PC button
+    local pcButton = Instance.new("TextButton")
+    pcButton.Name = "PCButton"
+    pcButton.Size = UDim2.new(0, 200, 0, 80)
+    pcButton.Position = UDim2.new(0.5, -100, 0, 240)
+    pcButton.BackgroundColor3 = ThemeManager:GetCurrentTheme().secondary
+    pcButton.BorderSizePixel = 1
+    pcButton.BorderColor3 = ThemeManager:GetCurrentTheme().accent
+    pcButton.Text = "💻 PC"
+    pcButton.TextColor3 = ThemeManager:GetCurrentTheme().text
+    pcButton.TextSize = 20
+    pcButton.Font = Enum.Font.GothamBold
+    pcButton.Parent = mainFrame
+
+    local pcCorner = Instance.new("UICorner")
+    pcCorner.CornerRadius = UDim.new(0, 8)
+    pcCorner.Parent = pcButton
+
+    -- Button hover effects
+    local function addHoverEffect(button)
+        button.MouseEnter:Connect(function()
+            button.BackgroundColor3 = ThemeManager:GetCurrentTheme().accent
+            button.TextColor3 = Color3.fromRGB(255, 255, 255)
+        end)
+        
+        button.MouseLeave:Connect(function()
+            button.BackgroundColor3 = ThemeManager:GetCurrentTheme().secondary
+            button.TextColor3 = ThemeManager:GetCurrentTheme().text
+        end)
+    end
+
+    addHoverEffect(mobileButton)
+    addHoverEffect(pcButton)
+
+    -- Add entrance animation
+    mainFrame.Position = UDim2.new(0.5, -250, 1.5, -200)
+    local entranceTween = TweenService:Create(mainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Position = UDim2.new(0.5, -250, 0.5, -200)
+    })
+    entranceTween:Play()
+
+    -- Event handlers
+    mobileButton.MouseButton1Click:Connect(function()
+        UserManager:SetUserPlatform("Mobile")
+        
+        -- Exit animation
+        local exitTween = TweenService:Create(mainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+            Position = UDim2.new(0.5, -250, -0.5, -200)
+        })
+        exitTween:Play()
+        exitTween.Completed:Connect(function()
+            screenGui:Destroy()
+            self:ShowCountrySelectionScreen()
+        end)
+    end)
+
+    pcButton.MouseButton1Click:Connect(function()
+        UserManager:SetUserPlatform("PC")
+        
+        -- Exit animation
+        local exitTween = TweenService:Create(mainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+            Position = UDim2.new(0.5, -250, -0.5, -200)
+        })
+        exitTween:Play()
+        exitTween.Completed:Connect(function()
+            screenGui:Destroy()
+            self:ShowCountrySelectionScreen()
+        end)
+    end)
+end
+
+--- Show country selection screen
+function GlobalChat:ShowCountrySelectionScreen()
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "GlobalChatCountrySelection"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+
+    -- Main container
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Name = "CountryContainer"
+    mainFrame.Size = UDim2.new(0, 600, 0, 500)
+    mainFrame.Position = UDim2.new(0.5, -300, 0.5, -250)
+    mainFrame.BackgroundColor3 = ThemeManager:GetCurrentTheme().primary
+    mainFrame.BorderSizePixel = 0
+    mainFrame.Parent = screenGui
+
+    -- Add corner radius
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 12)
+    corner.Parent = mainFrame
+
+    -- Title
+    local title = Instance.new("TextLabel")
+    title.Name = "Title"
+    title.Size = UDim2.new(1, 0, 0, 60)
+    title.Position = UDim2.new(0, 0, 0, 0)
+    title.BackgroundTransparency = 1
+    title.Text = "Select Your Country"
+    title.TextColor3 = ThemeManager:GetCurrentTheme().text
+    title.TextSize = 24
+    title.Font = Enum.Font.GothamBold
+    title.TextXAlignment = Enum.TextXAlignment.Center
+    title.Parent = mainFrame
+
+    -- Search box
+    local searchBox = Instance.new("TextBox")
+    searchBox.Name = "SearchBox"
+    searchBox.Size = UDim2.new(1, -40, 0, 40)
+    searchBox.Position = UDim2.new(0, 20, 0, 70)
+    searchBox.BackgroundColor3 = ThemeManager:GetCurrentTheme().secondary
+    searchBox.BorderSizePixel = 1
+    searchBox.BorderColor3 = ThemeManager:GetCurrentTheme().accent
+    searchBox.Text = ""
+    searchBox.PlaceholderText = "🔍 Search countries..."
+    searchBox.TextColor3 = ThemeManager:GetCurrentTheme().text
+    searchBox.PlaceholderColor3 = ThemeManager:GetCurrentTheme().textMuted
+    searchBox.TextSize = 16
+    searchBox.Font = Enum.Font.Gotham
+    searchBox.Parent = mainFrame
+
+    local searchCorner = Instance.new("UICorner")
+    searchCorner.CornerRadius = UDim.new(0, 8)
+    searchCorner.Parent = searchBox
+
+    -- Countries scroll frame
+    local scrollFrame = Instance.new("ScrollingFrame")
+    scrollFrame.Name = "CountriesScroll"
+    scrollFrame.Size = UDim2.new(1, -40, 1, -180)
+    scrollFrame.Position = UDim2.new(0, 20, 0, 120)
+    scrollFrame.BackgroundTransparency = 1
+    scrollFrame.BorderSizePixel = 0
+    scrollFrame.ScrollBarThickness = 8
+    scrollFrame.ScrollBarImageColor3 = ThemeManager:GetCurrentTheme().accent
+    scrollFrame.Parent = mainFrame
+
+    local layout = Instance.new("UIListLayout")
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Padding = UDim.new(0, 5)
+    layout.Parent = scrollFrame
+
+    -- Create country buttons
+    local countryButtons = {}
+    for i, country in ipairs(Config.COUNTRIES) do
+        local countryButton = Instance.new("TextButton")
+        countryButton.Name = "Country_" .. country.code
+        countryButton.Size = UDim2.new(1, -16, 0, 50)
+        countryButton.BackgroundColor3 = ThemeManager:GetCurrentTheme().secondary
+        countryButton.BorderSizePixel = 1
+        countryButton.BorderColor3 = ThemeManager:GetCurrentTheme().accent
+        countryButton.Text = country.flag .. " " .. country.name
+        countryButton.TextColor3 = ThemeManager:GetCurrentTheme().text
+        countryButton.TextSize = 16
+        countryButton.Font = Enum.Font.Gotham
+        countryButton.TextXAlignment = Enum.TextXAlignment.Left
+        countryButton.LayoutOrder = i
+        countryButton.Parent = scrollFrame
+
+        local buttonCorner = Instance.new("UICorner")
+        buttonCorner.CornerRadius = UDim.new(0, 8)
+        buttonCorner.Parent = countryButton
+
+        -- Add padding
+        local padding = Instance.new("UIPadding")
+        padding.PaddingLeft = UDim.new(0, 15)
+        padding.Parent = countryButton
+
+        -- Hover effect
+        countryButton.MouseEnter:Connect(function()
+            countryButton.BackgroundColor3 = ThemeManager:GetCurrentTheme().accent
+            countryButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+        end)
+        
+        countryButton.MouseLeave:Connect(function()
+            countryButton.BackgroundColor3 = ThemeManager:GetCurrentTheme().secondary
+            countryButton.TextColor3 = ThemeManager:GetCurrentTheme().text
+        end)
+
+        -- Click handler
+        countryButton.MouseButton1Click:Connect(function()
+            UserManager:SetUserCountry(country.code)
+            
+            -- Exit animation
+            local exitTween = TweenService:Create(mainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+                Position = UDim2.new(0.5, -300, -0.5, -250)
+            })
+            exitTween:Play()
+            exitTween.Completed:Connect(function()
+                screenGui:Destroy()
+                self:ShowLanguageSelectionScreen(country.code)
+            end)
+        end)
+
+        table.insert(countryButtons, {button = countryButton, country = country})
+    end
+
+    -- Search functionality
+    searchBox.Changed:Connect(function()
+        local searchText = searchBox.Text:lower()
+        for _, countryData in ipairs(countryButtons) do
+            local countryName = countryData.country.name:lower()
+            local isVisible = searchText == "" or countryName:find(searchText, 1, true)
+            countryData.button.Visible = isVisible
+        end
+    end)
+
+    -- Update scroll canvas size
+    layout.Changed:Connect(function()
+        scrollFrame.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
+    end)
+
+    -- Add entrance animation
+    mainFrame.Position = UDim2.new(0.5, -300, 1.5, -250)
+    local entranceTween = TweenService:Create(mainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Position = UDim2.new(0.5, -300, 0.5, -250)
+    })
+    entranceTween:Play()
+end
+
+--- Show language selection screen
+function GlobalChat:ShowLanguageSelectionScreen(countryCode)
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "GlobalChatLanguageSelection"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+
+    -- Main container
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Name = "LanguageContainer"
+    mainFrame.Size = UDim2.new(0, 500, 0, 400)
+    mainFrame.Position = UDim2.new(0.5, -250, 0.5, -200)
+    mainFrame.BackgroundColor3 = ThemeManager:GetCurrentTheme().primary
+    mainFrame.BorderSizePixel = 0
+    mainFrame.Parent = screenGui
+
+    -- Add corner radius
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 12)
+    corner.Parent = mainFrame
+
+    -- Title
+    local title = Instance.new("TextLabel")
+    title.Name = "Title"
+    title.Size = UDim2.new(1, 0, 0, 60)
+    title.Position = UDim2.new(0, 0, 0, 0)
+    title.BackgroundTransparency = 1
+    title.Text = "Select Your Language"
+    title.TextColor3 = ThemeManager:GetCurrentTheme().text
+    title.TextSize = 24
+    title.Font = Enum.Font.GothamBold
+    title.TextXAlignment = Enum.TextXAlignment.Center
+    title.Parent = mainFrame
+
+    -- Get languages for selected country
+    local selectedCountry = Config:GetCountryByCode(countryCode)
+    local languages = selectedCountry and selectedCountry.languages or {"English"}
+
+    -- Languages container
+    local languagesFrame = Instance.new("Frame")
+    languagesFrame.Name = "LanguagesFrame"
+    languagesFrame.Size = UDim2.new(1, -40, 1, -120)
+    languagesFrame.Position = UDim2.new(0, 20, 0, 80)
+    languagesFrame.BackgroundTransparency = 1
+    languagesFrame.Parent = mainFrame
+
+    local layout = Instance.new("UIListLayout")
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Padding = UDim.new(0, 10)
+    layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    layout.Parent = languagesFrame
+
+    -- Create language buttons
+    for i, language in ipairs(languages) do
+        local langButton = Instance.new("TextButton")
+        langButton.Name = "Language_" .. language
+        langButton.Size = UDim2.new(0, 300, 0, 60)
+        langButton.BackgroundColor3 = ThemeManager:GetCurrentTheme().secondary
+        langButton.BorderSizePixel = 1
+        langButton.BorderColor3 = ThemeManager:GetCurrentTheme().accent
+        langButton.Text = language
+        langButton.TextColor3 = ThemeManager:GetCurrentTheme().text
+        langButton.TextSize = 18
+        langButton.Font = Enum.Font.GothamBold
+        langButton.LayoutOrder = i
+        langButton.Parent = languagesFrame
+
+        local buttonCorner = Instance.new("UICorner")
+        buttonCorner.CornerRadius = UDim.new(0, 8)
+        buttonCorner.Parent = langButton
+
+        -- Hover effect
+        langButton.MouseEnter:Connect(function()
+            langButton.BackgroundColor3 = ThemeManager:GetCurrentTheme().accent
+            langButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+        end)
+        
+        langButton.MouseLeave:Connect(function()
+            langButton.BackgroundColor3 = ThemeManager:GetCurrentTheme().secondary
+            langButton.TextColor3 = ThemeManager:GetCurrentTheme().text
+        end)
+
+        -- Click handler
+        langButton.MouseButton1Click:Connect(function()
+            UserManager:SetUserLanguage(language)
+            
+            -- Exit animation
+            local exitTween = TweenService:Create(mainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+                Position = UDim2.new(0.5, -250, -0.5, -200)
+            })
+            exitTween:Play()
+            exitTween.Completed:Connect(function()
+                screenGui:Destroy()
+                self:ShowAuthenticationScreen()
+            end)
+        end)
+    end
+
+    -- Add entrance animation
+    mainFrame.Position = UDim2.new(0.5, -250, 1.5, -200)
+    local entranceTween = TweenService:Create(mainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Position = UDim2.new(0.5, -250, 0.5, -200)
+    })
+    entranceTween:Play()
 end
 
 -- Show setup wizard
@@ -5696,13 +6086,10 @@ function GlobalChat:ShowAuthenticationScreen()
                     print("✅ Auto-login successful!")
                     UserManager:LoginSuccess(data)
                     
-                    -- Check if user needs to complete setup
+                    -- Setup should already be complete, load chat interface
+                    UserManager:CompleteSetup()
                     local userConfig = UserManager:GetUserConfig()
-                    if not userConfig.setupComplete then
-                        GlobalChat:ShowSetupWizard()
-                    else
-                        GlobalChat:Initialize()
-                    end
+                    GlobalChat:LoadChatInterface(userConfig)
                 else
                     print("❌ Auto-login failed, showing login screen")
                     -- Clear saved credentials as they might be invalid
@@ -5903,11 +6290,11 @@ function GlobalChat:ShowAuthenticationScreen()
     -- Login button
     local loginButton = Instance.new("TextButton")
     loginButton.Name = "LoginButton"
-    loginButton.Size = UDim2.new(1, 0, 0, 50)
+    loginButton.Size = UDim2.new(0.48, 0, 0, 50)
     loginButton.Position = UDim2.new(0, 0, 0, 240)
     loginButton.BackgroundColor3 = ThemeManager:GetCurrentTheme().accent
     loginButton.BorderSizePixel = 0
-    loginButton.Text = "Sign In"
+    loginButton.Text = "🔑 Sign In"
     loginButton.TextColor3 = Color3.fromRGB(255, 255, 255)
     loginButton.TextSize = 18
     loginButton.Font = Enum.Font.GothamBold
@@ -5920,12 +6307,12 @@ function GlobalChat:ShowAuthenticationScreen()
     -- Register button
     local registerButton = Instance.new("TextButton")
     registerButton.Name = "RegisterButton"
-    registerButton.Size = UDim2.new(1, 0, 0, 50)
-    registerButton.Position = UDim2.new(0, 0, 0, 300)
+    registerButton.Size = UDim2.new(0.48, 0, 0, 50)
+    registerButton.Position = UDim2.new(0.52, 0, 0, 240)
     registerButton.BackgroundColor3 = ThemeManager:GetCurrentTheme().secondary
     registerButton.BorderSizePixel = 1
     registerButton.BorderColor3 = ThemeManager:GetCurrentTheme().accent
-    registerButton.Text = "Create Account"
+    registerButton.Text = "✨ Create Account"
     registerButton.TextColor3 = ThemeManager:GetCurrentTheme().text
     registerButton.TextSize = 18
     registerButton.Font = Enum.Font.GothamBold
@@ -5939,7 +6326,7 @@ function GlobalChat:ShowAuthenticationScreen()
     local rememberMeFrame = Instance.new("Frame")
     rememberMeFrame.Name = "RememberMeFrame"
     rememberMeFrame.Size = UDim2.new(1, 0, 0, 30)
-    rememberMeFrame.Position = UDim2.new(0, 0, 0, 360)
+    rememberMeFrame.Position = UDim2.new(0, 0, 0, 300)
     rememberMeFrame.BackgroundTransparency = 1
     rememberMeFrame.Parent = contentFrame
     
@@ -5992,7 +6379,7 @@ function GlobalChat:ShowAuthenticationScreen()
     local skipButton = Instance.new("TextButton")
     skipButton.Name = "SkipButton"
     skipButton.Size = UDim2.new(1, 0, 0, 40)
-    skipButton.Position = UDim2.new(0, 0, 0, 400)
+    skipButton.Position = UDim2.new(0, 0, 0, 340)
     skipButton.BackgroundTransparency = 1
     skipButton.Text = "Continue without account (Limited features)"
     skipButton.TextColor3 = ThemeManager:GetCurrentTheme().textMuted
@@ -6041,19 +6428,15 @@ function GlobalChat:ShowAuthenticationScreen()
                 
                 UserManager:LoginSuccess(data)
                 
-                -- Check if user needs to complete setup
+                -- Setup should already be complete, load chat interface
+                UserManager:CompleteSetup()
+                screenGui:Destroy()
                 local userConfig = UserManager:GetUserConfig()
-                if not userConfig.setupComplete then
-                    screenGui:Destroy()
-                    GlobalChat:ShowSetupWizard()
-                else
-                    screenGui:Destroy()
-                    GlobalChat:LoadChatInterface(userConfig)
-                end
+                GlobalChat:LoadChatInterface(userConfig)
             else
                 showStatus("Error: " .. tostring(data), true)
-                loginButton.Text = "Sign In"
-                registerButton.Text = "Create Account"
+                loginButton.Text = "🔑 Sign In"
+                registerButton.Text = "✨ Create Account"
             end
         end)
         
@@ -6072,7 +6455,13 @@ function GlobalChat:ShowAuthenticationScreen()
     skipButton.MouseButton1Click:Connect(function()
         -- Continue without authentication (limited features)
         screenGui:Destroy()
-        GlobalChat:ShowSetupWizard()
+        -- Set default values and load chat interface
+        UserManager:SetUserPlatform(GlobalChat:DetectPlatform())
+        UserManager:SetUserCountry("US")
+        UserManager:SetUserLanguage("English")
+        UserManager:CompleteSetup()
+        local userConfig = UserManager:GetUserConfig()
+        GlobalChat:LoadChatInterface(userConfig)
     end)
     
     -- Enter key support
@@ -6088,8 +6477,17 @@ function GlobalChat:ShowAuthenticationScreen()
         end
     end)
     
-    -- Focus username box initially
-    usernameBox:CaptureFocus()
+    -- Add entrance animation
+    mainFrame.Position = UDim2.new(0.5, -250, 1.5, -300)
+    local entranceTween = TweenService:Create(mainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Position = UDim2.new(0.5, -250, 0.5, -300)
+    })
+    entranceTween:Play()
+
+    -- Focus username box initially after animation
+    entranceTween.Completed:Connect(function()
+        usernameBox:CaptureFocus()
+    end)
 end
 
 -- Cleanup function
