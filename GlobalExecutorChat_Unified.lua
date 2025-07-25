@@ -6004,10 +6004,13 @@ function GlobalChat:ShowPlatformSelection()
     addHoverEffect(mobileButton)
     addHoverEffect(pcButton)
 
-    -- Add entrance animation
-    mainFrame.Position = UDim2.new(0.5, -250, 1.5, -200)
+    -- Add entrance animation (scale instead of position)
+    mainFrame.Size = UDim2.new(0, 0, 0, 0)
+    mainFrame.BackgroundTransparency = 1
+    
     local entranceTween = TweenService:Create(mainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-        Position = UDim2.new(0.5, -250, 0.5, -200)
+        Size = UDim2.new(0, 500, 0, 400),
+        BackgroundTransparency = 0
     })
     entranceTween:Play()
 
@@ -6015,9 +6018,10 @@ function GlobalChat:ShowPlatformSelection()
     mobileButton.MouseButton1Click:Connect(function()
         UserManager:SetUserPlatform("Mobile")
         
-        -- Exit animation
+        -- Exit animation (scale instead of position)
         local exitTween = TweenService:Create(mainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
-            Position = UDim2.new(0.5, -250, -0.5, -200)
+            Size = UDim2.new(0, 0, 0, 0),
+            BackgroundTransparency = 1
         })
         exitTween:Play()
         exitTween.Completed:Connect(function()
@@ -6029,9 +6033,10 @@ function GlobalChat:ShowPlatformSelection()
     pcButton.MouseButton1Click:Connect(function()
         UserManager:SetUserPlatform("PC")
         
-        -- Exit animation
+        -- Exit animation (scale instead of position)
         local exitTween = TweenService:Create(mainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
-            Position = UDim2.new(0.5, -250, -0.5, -200)
+            Size = UDim2.new(0, 0, 0, 0),
+            BackgroundTransparency = 1
         })
         exitTween:Play()
         exitTween.Completed:Connect(function()
