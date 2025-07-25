@@ -143,7 +143,7 @@ local Config = {
         FLOATING_BUTTON_SIZE = UDim2.new(0, 50, 0, 50),
         FLOATING_BUTTON_POSITION = UDim2.new(1, -70, 1, -100),
         NOTIFICATION_BADGE_SIZE = UDim2.new(0, 16, 0, 16),
-        CHAT_WINDOW_SIZE = UDim2.new(0.8, 0, 0.6, 0),
+        CHAT_WINDOW_SIZE = UDim2.new(0, 400, 0, 300),
         KEYBOARD_OFFSET = 180
     },
     
@@ -5117,8 +5117,7 @@ function GlobalChat:CreateMobileInterface(parent, userConfig)
     local chatWindow = Instance.new("Frame")
     chatWindow.Name = "ChatWindow"
     chatWindow.Size = Config.MOBILE.CHAT_WINDOW_SIZE
-    chatWindow.Position = UDim2.new(0.5, 0, 0.5, 0)
-    chatWindow.AnchorPoint = Vector2.new(0.5, 0.5)
+    chatWindow.Position = UDim2.new(0.5, -200, 0.5, -150)
     chatWindow.BackgroundColor3 = ThemeManager:GetCurrentTheme().primary
     chatWindow.BorderSizePixel = 0
     chatWindow.Visible = false
@@ -5128,43 +5127,124 @@ function GlobalChat:CreateMobileInterface(parent, userConfig)
     windowCorner.CornerRadius = UDim.new(0, 10)
     windowCorner.Parent = chatWindow
 
-    -- Make window draggable
-    local dragStart = nil
-    local startPos = nil
+    -- Create a draggable header for the chat window
+    local dragHeader = Instance.new("Frame")
+    dragHeader.Name = "DragHeader"
+    dragHeader.Size = UDim2.new(1, 0, 0, 40)
+    dragHeader.Position = UDim2.new(0, 0, 0, 0)
+    dragHeader.BackgroundColor3 = ThemeManager:GetCurrentTheme().secondary
+    dragHeader.BorderSizePixel = 0
+    dragHeader.Parent = chatWindow
     
-    chatWindow.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+    local headerCorner = Instance.new("UICorner")
+    headerCorner.CornerRadius = UDim.new(0, 10)
+    headerCorner.Parent = dragHeader
+    
+    -- Fix header corners
+    local headerFix = Instance.new("Frame")
+    headerFix.Size = UDim2.new(1, 0, 0, 10)
+    headerFix.Position = UDim2.new(0, 0, 1, -10)
+    headerFix.BackgroundColor3 = dragHeader.BackgroundColor3
+    headerFix.BorderSizePixel = 0
+    headerFix.Parent = dragHeader
+    
+    -- Add title to header
+    local headerTitle = Instance.new("TextLabel")
+    headerTitle.Name = "Title"
+    headerTitle.Size = UDim2.new(1, -160, 1, 0)
+    headerTitle.Position = UDim2.new(0, 15, 0, 0)
+    headerTitle.BackgroundTransparency = 1
+    headerTitle.Text = "Global Chat"
+    headerTitle.TextColor3 = ThemeManager:GetCurrentTheme().text
+    headerTitle.TextSize = 16
+    headerTitle.Font = Enum.Font.GothamBold
+    headerTitle.TextXAlignment = Enum.TextXAlignment.Left
+    headerTitle.Parent = dragHeader
+    
+    -- Make window properly draggable using the header
+    local dragging = false
+    local dragInput
+    local dragStart
+    local startPos
+    
+    local function updateDrag(input)
+        if not dragging then return end
+        
+        local delta = input.Position - dragStart
+        local newPosition = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        
+        -- Clamp position to screen bounds
+        local screenSize = GuiService:GetScreenResolution()
+        local windowSize = chatWindow.AbsoluteSize
+        
+        local minX = 0
+        local maxX = screenSize.X - windowSize.X
+        local minY = 0
+        local maxY = screenSize.Y - windowSize.Y
+        
+        local newX = math.clamp(newPosition.X.Offset, minX, maxX)
+        local newY = math.clamp(newPosition.Y.Offset, minY, maxY)
+        
+        chatWindow.Position = UDim2.new(newPosition.X.Scale, newX, newPosition.Y.Scale, newY)
+    end
+    
+    dragHeader.InputBegan:Connect(function(input)
+        if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+            dragging = true
             dragStart = input.Position
             startPos = chatWindow.Position
+            
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
         end
     end)
     
-    chatWindow.InputChanged:Connect(function(input)
+    dragHeader.InputChanged:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-            if dragStart then
-                local delta = input.Position - dragStart
-                chatWindow.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-            end
+            dragInput = input
         end
     end)
     
-    chatWindow.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragStart = nil
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            updateDrag(input)
         end
     end)
 
 
+    
+    -- Content container (to hold actual chat content)
+    local contentContainer = Instance.new("Frame")
+    contentContainer.Name = "ContentContainer"
+    contentContainer.Size = UDim2.new(1, 0, 1, -50) -- Leave space for header
+    contentContainer.Position = UDim2.new(0, 0, 0, 50)
+    contentContainer.BackgroundColor3 = ThemeManager:GetCurrentTheme().primary
+    contentContainer.BackgroundTransparency = 0.1
+    contentContainer.BorderSizePixel = 0
+    contentContainer.Parent = chatWindow
     
     -- Toggle functionality
     local isOpen = false
+    local initialPosition = UDim2.new(0.5, -200, 0.5, -150)
+    
+    -- Store the position when window is closed so we can reopen in same position
+    local lastPosition = initialPosition
+    
     floatingButton.MouseButton1Click:Connect(function()
         isOpen = not isOpen
         
         if isOpen then
-            -- Position the chat window properly for mobile
-            chatWindow.Position = UDim2.new(0.5, 0, 0.5, 0)
-            chatWindow.AnchorPoint = Vector2.new(0.5, 0.5)
+            -- Use the last position if available, otherwise center
+            if lastPosition then
+                chatWindow.Position = lastPosition
+            else
+                chatWindow.Position = initialPosition
+            end
+            
+            -- Position is already set correctly, no need for anchor point
             chatWindow.Visible = true
             
             -- Animate the window opening
@@ -5177,6 +5257,9 @@ function GlobalChat:CreateMobileInterface(parent, userConfig)
                 BackgroundTransparency = 0
             }):Play()
         else
+            -- Store current position before closing
+            lastPosition = chatWindow.Position
+            
             -- Animate closing
             local closeTween = TweenService:Create(chatWindow, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
                 Size = UDim2.new(0, 0, 0, 0),
@@ -5195,14 +5278,15 @@ function GlobalChat:CreateMobileInterface(parent, userConfig)
     local mobileMinimizeButton = Instance.new("TextButton")
     mobileMinimizeButton.Name = "MinimizeButton"
     mobileMinimizeButton.Size = UDim2.new(0, 30, 0, 30)
-    mobileMinimizeButton.Position = UDim2.new(1, -80, 0, 10)
+    mobileMinimizeButton.Position = UDim2.new(1, -80, 0.5, -15)
     mobileMinimizeButton.BackgroundColor3 = Color3.fromRGB(255, 193, 7)
     mobileMinimizeButton.BorderSizePixel = 0
     mobileMinimizeButton.Text = "−"
     mobileMinimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
     mobileMinimizeButton.TextSize = 16
     mobileMinimizeButton.Font = Enum.Font.GothamBold
-    mobileMinimizeButton.Parent = chatWindow
+    mobileMinimizeButton.Parent = dragHeader
+    mobileMinimizeButton.ZIndex = 10
 
     local mobileMinimizeCorner = Instance.new("UICorner")
     mobileMinimizeCorner.CornerRadius = UDim.new(0.5, 0)
@@ -5210,21 +5294,33 @@ function GlobalChat:CreateMobileInterface(parent, userConfig)
 
     mobileMinimizeButton.MouseButton1Click:Connect(function()
         isOpen = false
-        chatWindow.Visible = false
+        
+        -- Animate closing
+        local closeTween = TweenService:Create(chatWindow, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+            Size = UDim2.new(0, 0, 0, 0),
+            BackgroundTransparency = 1
+        })
+        
+        closeTween.Completed:Connect(function()
+            chatWindow.Visible = false
+        end)
+        
+        closeTween:Play()
     end)
 
     -- Add close button to mobile interface
     local mobileCloseButton = Instance.new("TextButton")
     mobileCloseButton.Name = "CloseButton"
     mobileCloseButton.Size = UDim2.new(0, 30, 0, 30)
-    mobileCloseButton.Position = UDim2.new(1, -40, 0, 10)
+    mobileCloseButton.Position = UDim2.new(1, -40, 0.5, -15)
     mobileCloseButton.BackgroundColor3 = Color3.fromRGB(220, 53, 69)
     mobileCloseButton.BorderSizePixel = 0
     mobileCloseButton.Text = "✕"
     mobileCloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
     mobileCloseButton.TextSize = 16
     mobileCloseButton.Font = Enum.Font.GothamBold
-    mobileCloseButton.Parent = chatWindow
+    mobileCloseButton.Parent = dragHeader
+    mobileCloseButton.ZIndex = 10
 
     local mobileCloseCorner = Instance.new("UICorner")
     mobileCloseCorner.CornerRadius = UDim.new(0.5, 0)
@@ -5232,21 +5328,33 @@ function GlobalChat:CreateMobileInterface(parent, userConfig)
 
     mobileCloseButton.MouseButton1Click:Connect(function()
         isOpen = false
-        chatWindow.Visible = false
+        
+        -- Animate closing
+        local closeTween = TweenService:Create(chatWindow, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+            Size = UDim2.new(0, 0, 0, 0),
+            BackgroundTransparency = 1
+        })
+        
+        closeTween.Completed:Connect(function()
+            chatWindow.Visible = false
+        end)
+        
+        closeTween:Play()
     end)
 
     -- Add settings button to mobile interface
     local mobileSettingsButton = Instance.new("TextButton")
     mobileSettingsButton.Name = "SettingsButton"
     mobileSettingsButton.Size = UDim2.new(0, 30, 0, 30)
-    mobileSettingsButton.Position = UDim2.new(1, -120, 0, 10)
+    mobileSettingsButton.Position = UDim2.new(1, -120, 0.5, -15)
     mobileSettingsButton.BackgroundColor3 = ThemeManager:GetCurrentTheme().accent
     mobileSettingsButton.BorderSizePixel = 0
     mobileSettingsButton.Text = "⚙️"
     mobileSettingsButton.TextColor3 = Color3.fromRGB(255, 255, 255)
     mobileSettingsButton.TextSize = 16
     mobileSettingsButton.Font = Enum.Font.GothamBold
-    mobileSettingsButton.Parent = chatWindow
+    mobileSettingsButton.Parent = dragHeader
+    mobileSettingsButton.ZIndex = 10
     
     local mobileSettingsCorner = Instance.new("UICorner")
     mobileSettingsCorner.CornerRadius = UDim.new(0.5, 0)
@@ -5257,39 +5365,8 @@ function GlobalChat:CreateMobileInterface(parent, userConfig)
         showSettingsMenu()
     end)
 
-    -- Add drag functionality to mobile chat window
-    local function makeDraggable(frame)
-        local dragging = false
-        local dragStart = nil
-        local startPos = nil
-
-        frame.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                dragging = true
-                dragStart = input.Position
-                startPos = frame.Position
-            end
-        end)
-
-        frame.InputChanged:Connect(function(input)
-            if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-                local delta = input.Position - dragStart
-                frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-            end
-        end)
-
-        frame.InputEnded:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                dragging = false
-            end
-        end)
-    end
-
-    -- Make the chat window draggable
-    makeDraggable(chatWindow)
-    
     -- Add basic chat elements
-    self:AddChatElements(chatWindow, userConfig)
+    self:AddChatElements(contentContainer, userConfig)
 end
 
 -- Create desktop interface
@@ -5300,15 +5377,14 @@ function GlobalChat:CreateDesktopInterface(parent, userConfig)
     mainWindow.Size = UDim2.new(0, Config.DESKTOP.WINDOW_DEFAULT_SIZE.X, 0, Config.DESKTOP.WINDOW_DEFAULT_SIZE.Y)
     mainWindow.Position = UDim2.new(0.5, -Config.DESKTOP.WINDOW_DEFAULT_SIZE.X/2, 0.5, -Config.DESKTOP.WINDOW_DEFAULT_SIZE.Y/2)
     mainWindow.BackgroundColor3 = ThemeManager:GetCurrentTheme().primary
-    mainWindow.BorderSizePixel = 1
-    mainWindow.BorderColor3 = ThemeManager:GetCurrentTheme().accent
+    mainWindow.BorderSizePixel = 0
     mainWindow.Parent = parent
     
     local windowCorner = Instance.new("UICorner")
     windowCorner.CornerRadius = UDim.new(0, 8)
     windowCorner.Parent = mainWindow
     
-    -- Title bar
+    -- Title bar (draggable header)
     local titleBar = Instance.new("Frame")
     titleBar.Name = "TitleBar"
     titleBar.Size = UDim2.new(1, 0, 0, 40)
@@ -5320,6 +5396,59 @@ function GlobalChat:CreateDesktopInterface(parent, userConfig)
     local titleCorner = Instance.new("UICorner")
     titleCorner.CornerRadius = UDim.new(0, 8)
     titleCorner.Parent = titleBar
+    
+    -- Make window properly draggable using the title bar
+    local dragging = false
+    local dragInput
+    local dragStart
+    local startPos
+    
+    local function updateDrag(input)
+        if not dragging then return end
+        
+        local delta = input.Position - dragStart
+        local newPosition = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        
+        -- Clamp position to screen bounds
+        local screenSize = GuiService:GetScreenResolution()
+        local windowSize = mainWindow.AbsoluteSize
+        
+        local minX = 0
+        local maxX = screenSize.X - windowSize.X
+        local minY = 0
+        local maxY = screenSize.Y - windowSize.Y
+        
+        local newX = math.clamp(newPosition.X.Offset, minX, maxX)
+        local newY = math.clamp(newPosition.Y.Offset, minY, maxY)
+        
+        mainWindow.Position = UDim2.new(newPosition.X.Scale, newX, newPosition.Y.Scale, newY)
+    end
+    
+    titleBar.InputBegan:Connect(function(input)
+        if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+            dragging = true
+            dragStart = input.Position
+            startPos = mainWindow.Position
+            
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    
+    titleBar.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then
+            updateDrag(input)
+        end
+    end)
     
     -- Fix title bar corners
     local titleFix = Instance.new("Frame")
@@ -5460,8 +5589,18 @@ function GlobalChat:CreateDesktopInterface(parent, userConfig)
         parent:Destroy()
     end)
     
+    -- Content container (to hold actual chat content)
+    local contentContainer = Instance.new("Frame")
+    contentContainer.Name = "ContentContainer"
+    contentContainer.Size = UDim2.new(1, 0, 1, -50) -- Leave space for title bar
+    contentContainer.Position = UDim2.new(0, 0, 0, 50)
+    contentContainer.BackgroundColor3 = ThemeManager:GetCurrentTheme().primary
+    contentContainer.BackgroundTransparency = 0.1
+    contentContainer.BorderSizePixel = 0
+    contentContainer.Parent = mainWindow
+    
     -- Add basic chat elements
-    self:AddChatElements(mainWindow, userConfig)
+    self:AddChatElements(contentContainer, userConfig)
 end
 
 -- Add basic chat elements
@@ -5725,11 +5864,12 @@ function GlobalChat:ShowPlatformSelection()
     screenGui.ResetOnSpawn = false
     screenGui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
 
-    -- Main container - Mobile responsive
+    -- Main container - Fixed positioning
     local mainFrame = Instance.new("Frame")
     mainFrame.Name = "PlatformContainer"
-    mainFrame.Size = UDim2.new(0.9, 0, 0.6, 0)
-    mainFrame.Position = UDim2.new(0.05, 0, 0.2, 0)
+    mainFrame.Size = UDim2.new(0, 500, 0, 400)
+    mainFrame.Position = UDim2.new(0.5, -250, 0.5, -200)
+    mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
     mainFrame.BackgroundColor3 = ThemeManager:GetCurrentTheme().primary
     mainFrame.BorderSizePixel = 0
     mainFrame.Parent = screenGui
@@ -5738,6 +5878,32 @@ function GlobalChat:ShowPlatformSelection()
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(0, 12)
     corner.Parent = mainFrame
+
+    -- Make the frame draggable
+    local dragging = false
+    local dragStart = nil
+    local startPos = nil
+    
+    mainFrame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = mainFrame.Position
+            
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
 
     -- Close button
     local closeButton = Instance.new("TextButton")
@@ -5838,10 +6004,13 @@ function GlobalChat:ShowPlatformSelection()
     addHoverEffect(mobileButton)
     addHoverEffect(pcButton)
 
-    -- Add entrance animation
-    mainFrame.Position = UDim2.new(0.5, -250, 1.5, -200)
+    -- Add entrance animation (scale instead of position)
+    mainFrame.Size = UDim2.new(0, 0, 0, 0)
+    mainFrame.BackgroundTransparency = 1
+    
     local entranceTween = TweenService:Create(mainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-        Position = UDim2.new(0.5, -250, 0.5, -200)
+        Size = UDim2.new(0, 500, 0, 400),
+        BackgroundTransparency = 0
     })
     entranceTween:Play()
 
@@ -5849,9 +6018,10 @@ function GlobalChat:ShowPlatformSelection()
     mobileButton.MouseButton1Click:Connect(function()
         UserManager:SetUserPlatform("Mobile")
         
-        -- Exit animation
+        -- Exit animation (scale instead of position)
         local exitTween = TweenService:Create(mainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
-            Position = UDim2.new(0.5, -250, -0.5, -200)
+            Size = UDim2.new(0, 0, 0, 0),
+            BackgroundTransparency = 1
         })
         exitTween:Play()
         exitTween.Completed:Connect(function()
@@ -5863,9 +6033,10 @@ function GlobalChat:ShowPlatformSelection()
     pcButton.MouseButton1Click:Connect(function()
         UserManager:SetUserPlatform("PC")
         
-        -- Exit animation
+        -- Exit animation (scale instead of position)
         local exitTween = TweenService:Create(mainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
-            Position = UDim2.new(0.5, -250, -0.5, -200)
+            Size = UDim2.new(0, 0, 0, 0),
+            BackgroundTransparency = 1
         })
         exitTween:Play()
         exitTween.Completed:Connect(function()
@@ -5882,11 +6053,12 @@ function GlobalChat:ShowCountrySelectionScreen()
     screenGui.ResetOnSpawn = false
     screenGui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
 
-    -- Main container - Mobile responsive
+    -- Main container - Fixed positioning
     local mainFrame = Instance.new("Frame")
     mainFrame.Name = "CountryContainer"
-    mainFrame.Size = UDim2.new(0.9, 0, 0.8, 0)
-    mainFrame.Position = UDim2.new(0.05, 0, 0.1, 0)
+    mainFrame.Size = UDim2.new(0, 600, 0, 500)
+    mainFrame.Position = UDim2.new(0.5, -300, 0.5, -250)
+    mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
     mainFrame.BackgroundColor3 = ThemeManager:GetCurrentTheme().primary
     mainFrame.BorderSizePixel = 0
     mainFrame.Parent = screenGui
@@ -5895,6 +6067,32 @@ function GlobalChat:ShowCountrySelectionScreen()
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(0, 12)
     corner.Parent = mainFrame
+
+    -- Make the frame draggable
+    local dragging = false
+    local dragStart = nil
+    local startPos = nil
+    
+    mainFrame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = mainFrame.Position
+            
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local delta = input.Position - dragStart
+            mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
 
     -- Close button
     local closeButton = Instance.new("TextButton")
