@@ -76,8 +76,9 @@ local Config = {
     BRAND_NAME = nil, -- Set dynamically
     
     -- Server Configuration (Updated with working VM infrastructure)
-    SERVER_URL = "ws://192.250.226.90:17002",
-    API_BASE_URL = "http://192.250.226.90:17001",
+    SERVER_URL = "wss://192.250.226.90:17002",
+    WEBSOCKET_URL = "wss://192.250.226.90:17002", -- Secure WebSocket URL
+    API_BASE_URL = "https://192.250.226.90:17001", -- Secure HTTP URL
     HEARTBEAT_INTERVAL = 30,
     RECONNECT_DELAY = 5,
     MAX_RECONNECT_ATTEMPTS = 10,
@@ -703,27 +704,119 @@ function Utils:GetPlatform()
     end
 end
 
--- Storage Utilities (using DataStore simulation)
-local storage = {}
-
+-- Storage Utilities (using persistent storage)
 function Utils:SaveData(key, data)
-    storage[key] = HttpService:JSONEncode(data)
+    -- Ensure key is valid
+    key = "GlobalChat_" .. key
+    
+    -- Convert data to JSON
+    local jsonData = HttpService:JSONEncode(data)
+    
+    -- Try to use executor-specific persistent storage
+    local success = false
+    
+    -- Try Synapse
+    if syn and syn.write_file then
+        success = pcall(function()
+            syn.write_file(key .. ".json", jsonData)
+        end)
+    -- Try Krnl
+    elseif writefile then
+        success = pcall(function()
+            writefile(key .. ".json", jsonData)
+        end)
+    -- Try Fluxus
+    elseif fluxus and fluxus.write_file then
+        success = pcall(function()
+            fluxus.write_file(key .. ".json", jsonData)
+        end)
+    -- Try Script-Ware
+    elseif saveinstance then
+        success = pcall(function()
+            writefile(key .. ".json", jsonData)
+        end)
+    end
+    
+    if not success then
+        print("⚠️ Failed to save data to persistent storage")
+    end
+    
+    return success
 end
 
 function Utils:LoadData(key, default)
-    if storage[key] then
-        local success, result = pcall(function()
-            return HttpService:JSONDecode(storage[key])
+    -- Ensure key is valid
+    key = "GlobalChat_" .. key
+    
+    local content = nil
+    local success = false
+    
+    -- Try to use executor-specific persistent storage
+    -- Try Synapse
+    if syn and syn.read_file then
+        success, content = pcall(function()
+            return syn.read_file(key .. ".json")
         end)
-        if success then
+    -- Try Krnl
+    elseif readfile then
+        success, content = pcall(function()
+            return readfile(key .. ".json")
+        end)
+    -- Try Fluxus
+    elseif fluxus and fluxus.read_file then
+        success, content = pcall(function()
+            return fluxus.read_file(key .. ".json")
+        end)
+    -- Try Script-Ware
+    elseif saveinstance then
+        success, content = pcall(function()
+            return readfile(key .. ".json")
+        end)
+    end
+    
+    if success and content then
+        local parseSuccess, result = pcall(function()
+            return HttpService:JSONDecode(content)
+        end)
+        
+        if parseSuccess then
             return result
         end
     end
+    
     return default
 end
 
 function Utils:ClearData(key)
-    storage[key] = nil
+    -- Ensure key is valid
+    key = "GlobalChat_" .. key
+    
+    -- Try to use executor-specific persistent storage
+    local success = false
+    
+    -- Try Synapse
+    if syn and syn.delfile then
+        success = pcall(function()
+            syn.delfile(key .. ".json")
+        end)
+    -- Try Krnl
+    elseif delfile then
+        success = pcall(function()
+            delfile(key .. ".json")
+        end)
+    -- Try Fluxus
+    elseif fluxus and fluxus.delete_file then
+        success = pcall(function()
+            fluxus.delete_file(key .. ".json")
+        end)
+    -- Try Script-Ware
+    elseif saveinstance then
+        success = pcall(function()
+            delfile(key .. ".json")
+        end)
+    end
+    
+    return success
 end
 
 -- Network Utilities
@@ -1211,6 +1304,92 @@ end
 -- Data Persistence
 function UserManager:SaveUserData()
     Utils:SaveData("globalchat_userdata", userData)
+end
+
+function UserManager:SaveCredentials(username, password, rememberMe)
+    if rememberMe then
+        -- Create a simple encryption by XORing with a key
+        local encryptionKey = "GlobalChat_SecureKey_" .. Utils:GenerateUUID():sub(1, 8)
+        local encryptedPassword = ""
+        
+        -- Simple XOR encryption (not truly secure but better than plaintext)
+        for i = 1, #password do
+            local char = string.byte(password:sub(i, i))
+            local keyChar = string.byte(encryptionKey:sub((i % #encryptionKey) + 1, (i % #encryptionKey) + 1))
+            encryptedPassword = encryptedPassword .. string.char(bit32.bxor(char, keyChar))
+        end
+        
+        local credentials = {
+            username = username,
+            password = encryptedPassword,
+            key = encryptionKey,
+            timestamp = os.time()
+        }
+        
+        Utils:SaveData("globalchat_credentials", credentials)
+        print("✅ Credentials saved for automatic login")
+    else
+        -- If remember me is disabled, clear any saved credentials
+        self:ClearSavedCredentials()
+    end
+end
+
+function UserManager:ClearSavedCredentials()
+    Utils:SaveData("globalchat_credentials", nil)
+    print("🔄 Saved credentials cleared")
+end
+
+function UserManager:Logout()
+    -- Clear authentication data
+    userData.authToken = nil
+    userData.isAuthenticated = false
+    userData.serverUserId = nil
+    
+    -- Clear saved credentials
+    self:ClearSavedCredentials()
+    
+    -- Disconnect from server
+    NetworkManager:Disconnect()
+    
+    -- Show authentication screen again
+    GlobalChat:ShowAuthenticationScreen()
+    
+    -- Save the updated user data
+    self:SaveUserData()
+    
+    print("👋 User logged out successfully")
+    
+    -- Disconnect from server
+    NetworkManager:DisconnectFromServer()
+    
+    -- Return to login screen
+    GlobalChat:ShowAuthenticationScreen()
+end
+
+function UserManager:GetSavedCredentials()
+    local credentials = Utils:LoadData("globalchat_credentials", nil)
+    
+    if credentials and credentials.username and credentials.password and credentials.key then
+        -- Decrypt password
+        local encryptedPassword = credentials.password
+        local encryptionKey = credentials.key
+        local decryptedPassword = ""
+        
+        -- Simple XOR decryption
+        for i = 1, #encryptedPassword do
+            local char = string.byte(encryptedPassword:sub(i, i))
+            local keyChar = string.byte(encryptionKey:sub((i % #encryptionKey) + 1, (i % #encryptionKey) + 1))
+            decryptedPassword = decryptedPassword .. string.char(bit32.bxor(char, keyChar))
+        end
+        
+        return {
+            username = credentials.username,
+            password = decryptedPassword,
+            timestamp = credentials.timestamp
+        }
+    end
+    
+    return nil
 end
 
 function UserManager:LoadUserData()
@@ -2458,6 +2637,144 @@ local notificationSettings = {
     systemMessages = false
 }
 
+-- Settings menu
+local function createSettingsMenu()
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "GlobalChatSettings"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+    
+    -- Main container with blur effect
+    local blurFrame = Instance.new("Frame")
+    blurFrame.Name = "BlurBackground"
+    blurFrame.Size = UDim2.new(1, 0, 1, 0)
+    blurFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    blurFrame.BackgroundTransparency = 0.5
+    blurFrame.BorderSizePixel = 0
+    blurFrame.Parent = screenGui
+    
+    -- Settings panel
+    local settingsFrame = Instance.new("Frame")
+    settingsFrame.Name = "SettingsPanel"
+    settingsFrame.Size = UDim2.new(0, 400, 0, 500)
+    settingsFrame.Position = UDim2.new(0.5, -200, 0.5, -250)
+    settingsFrame.BackgroundColor3 = ThemeManager:GetCurrentTheme().primary
+    settingsFrame.BorderSizePixel = 0
+    settingsFrame.Parent = screenGui
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 12)
+    corner.Parent = settingsFrame
+    
+    -- Title
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Name = "TitleLabel"
+    titleLabel.Size = UDim2.new(1, 0, 0, 50)
+    titleLabel.Position = UDim2.new(0, 0, 0, 0)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Text = "Settings"
+    titleLabel.TextColor3 = ThemeManager:GetCurrentTheme().textPrimary
+    titleLabel.TextSize = 24
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.Parent = settingsFrame
+    
+    -- Close button
+    local closeButton = Instance.new("TextButton")
+    closeButton.Name = "CloseButton"
+    closeButton.Size = UDim2.new(0, 30, 0, 30)
+    closeButton.Position = UDim2.new(1, -40, 0, 10)
+    closeButton.BackgroundTransparency = 1
+    closeButton.Text = "✕"
+    closeButton.TextColor3 = ThemeManager:GetCurrentTheme().textPrimary
+    closeButton.TextSize = 20
+    closeButton.Font = Enum.Font.GothamBold
+    closeButton.Parent = settingsFrame
+    
+    -- Content frame
+    local contentFrame = Instance.new("ScrollingFrame")
+    contentFrame.Name = "ContentFrame"
+    contentFrame.Size = UDim2.new(1, -40, 1, -70)
+    contentFrame.Position = UDim2.new(0, 20, 0, 60)
+    contentFrame.BackgroundTransparency = 1
+    contentFrame.ScrollBarThickness = 6
+    contentFrame.ScrollingDirection = Enum.ScrollingDirection.Y
+    contentFrame.CanvasSize = UDim2.new(0, 0, 0, 600)
+    contentFrame.Parent = settingsFrame
+    
+    -- Account section
+    local accountLabel = Instance.new("TextLabel")
+    accountLabel.Name = "AccountLabel"
+    accountLabel.Size = UDim2.new(1, 0, 0, 30)
+    accountLabel.Position = UDim2.new(0, 0, 0, 0)
+    accountLabel.BackgroundTransparency = 1
+    accountLabel.Text = "Account"
+    accountLabel.TextColor3 = ThemeManager:GetCurrentTheme().accent
+    accountLabel.TextSize = 18
+    accountLabel.Font = Enum.Font.GothamBold
+    accountLabel.TextXAlignment = Enum.TextXAlignment.Left
+    accountLabel.Parent = contentFrame
+    
+    -- Username display
+    local usernameLabel = Instance.new("TextLabel")
+    usernameLabel.Name = "UsernameLabel"
+    usernameLabel.Size = UDim2.new(1, 0, 0, 25)
+    usernameLabel.Position = UDim2.new(0, 0, 0, 40)
+    usernameLabel.BackgroundTransparency = 1
+    usernameLabel.Text = "Username: " .. (userData.username or "Guest")
+    usernameLabel.TextColor3 = ThemeManager:GetCurrentTheme().textPrimary
+    usernameLabel.TextSize = 16
+    usernameLabel.Font = Enum.Font.Gotham
+    usernameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    usernameLabel.Parent = contentFrame
+    
+    -- Logout button
+    local logoutButton = Instance.new("TextButton")
+    logoutButton.Name = "LogoutButton"
+    logoutButton.Size = UDim2.new(1, 0, 0, 40)
+    logoutButton.Position = UDim2.new(0, 0, 0, 80)
+    logoutButton.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
+    logoutButton.BorderSizePixel = 0
+    logoutButton.Text = "Logout"
+    logoutButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    logoutButton.TextSize = 16
+    logoutButton.Font = Enum.Font.GothamBold
+    logoutButton.Parent = contentFrame
+    
+    local logoutCorner = Instance.new("UICorner")
+    logoutCorner.CornerRadius = UDim.new(0, 8)
+    logoutCorner.Parent = logoutButton
+    
+    -- Notification settings section
+    local notifLabel = Instance.new("TextLabel")
+    notifLabel.Name = "NotificationLabel"
+    notifLabel.Size = UDim2.new(1, 0, 0, 30)
+    notifLabel.Position = UDim2.new(0, 0, 0, 150)
+    notifLabel.BackgroundTransparency = 1
+    notifLabel.Text = "Notifications"
+    notifLabel.TextColor3 = ThemeManager:GetCurrentTheme().accent
+    notifLabel.TextSize = 18
+    notifLabel.Font = Enum.Font.GothamBold
+    notifLabel.TextXAlignment = Enum.TextXAlignment.Left
+    notifLabel.Parent = contentFrame
+    
+    -- Event connections
+    closeButton.MouseButton1Click:Connect(function()
+        screenGui:Destroy()
+    end)
+    
+    logoutButton.MouseButton1Click:Connect(function()
+        screenGui:Destroy()
+        UserManager:Logout()
+    end)
+    
+    return screenGui
+end
+
+-- Function to show settings menu
+function showSettingsMenu()
+    createSettingsMenu()
+end
+
 -- Sound IDs for different notification types
 local SOUND_IDS = {
     message = "rbxassetid://131961136",
@@ -2975,9 +3292,11 @@ local networkState = {
     currentServer = nil,
     sessionToken = nil,
     lastPing = 0,
+    lastTokenRefresh = 0,
     reconnectAttempts = 0,
     messageQueue = {},
-    heartbeatConnection = nil
+    heartbeatConnection = nil,
+    websocket = nil
 }
 
 -- Event callbacks
@@ -3015,33 +3334,130 @@ function NetworkManager:ConnectToServer(serverUrl, authToken)
     networkState.currentServer = serverUrl
     networkState.sessionToken = authToken
     networkState.reconnectAttempts = 0
+    networkState.lastPing = os.time() -- Initialize lastPing
     
     print("🌐 Connecting to server: " .. serverUrl)
     
-    -- Simulate WebSocket connection (in production, use actual WebSocket)
-    self:SimulateConnection(serverUrl, authToken)
-end
-
-function NetworkManager:SimulateConnection(serverUrl, authToken)
+    -- Real WebSocket connection implementation
     spawn(function()
-        wait(math.random(1, 3)) -- Simulate connection time
-        
-        -- Simulate connection success/failure
-        local success = math.random() > 0.1 -- 90% success rate
-        
-        if success then
+        local success, errorMsg = pcall(function()
+            -- Create WebSocket connection
+            local ws = WebSocket.connect(serverUrl)
+            networkState.websocket = ws
+            
+            -- Set up event handlers
+            ws.OnMessage:Connect(function(message)
+                self:HandleWebSocketMessage(message)
+            end)
+            
+            ws.OnClose:Connect(function(code, reason)
+                print("🔌 WebSocket closed: " .. (reason or "Unknown reason") .. " (Code: " .. code .. ")")
+                networkState.isConnected = false
+                self:TriggerEvent("onDisconnected", reason)
+                self:HandleConnectionFailure()
+            end)
+            
+            ws.OnError:Connect(function(error)
+                print("❌ WebSocket error: " .. tostring(error))
+                self:TriggerEvent("onError", error)
+            end)
+            
+            -- Send authentication message
+            local authMessage = {
+                type = "auth",
+                userId = UserManager:GetUserId(),
+                username = UserManager:GetUsername(),
+                executor = identifyExecutor(),
+                token = authToken
+            }
+            
+            ws:Send(HttpService:JSONEncode(authMessage))
+            
+            -- Connection successful
             networkState.isConnected = true
             networkState.lastPing = os.time()
-            
             self:TriggerEvent("onConnected", serverUrl)
             self:StartHeartbeat()
             
             print("✅ Connected to server successfully")
-        else
-            self:TriggerEvent("onError", "Connection failed")
+        end)
+        
+        if not success then
+            print("❌ WebSocket connection failed: " .. tostring(errorMsg))
+            self:TriggerEvent("onError", "Connection failed: " .. tostring(errorMsg))
             self:HandleConnectionFailure()
         end
     end)
+end
+
+function NetworkManager:HandleWebSocketMessage(message)
+    local success, data = pcall(function()
+        return HttpService:JSONDecode(message)
+    end)
+    
+    if not success then
+        print("❌ Failed to parse WebSocket message: " .. tostring(data))
+        return
+    end
+    
+    -- Update last ping time for connection health monitoring
+    networkState.lastPing = os.time()
+    
+    -- Process message based on type
+    if data.type == "auth_success" then
+        self:TriggerEvent("onAuthResponse", data)
+        print("🔐 Authentication successful")
+    elseif data.type == "auth_error" then
+        self:TriggerEvent("onAuthError", data)
+        print("❌ Authentication error: " .. (data.message or "Unknown error"))
+    elseif data.type == "chat_message" then
+        self:TriggerEvent("onMessage", data)
+    elseif data.type == "private_message" then
+        self:TriggerEvent("onPrivateMessage", data)
+    elseif data.type == "message_delivered" then
+        self:TriggerEvent("onMessageDelivered", data)
+    elseif data.type == "user_joined" then
+        self:TriggerEvent("onUserJoined", data)
+    elseif data.type == "user_left" then
+        self:TriggerEvent("onUserLeft", data)
+    elseif data.type == "user_typing" then
+        self:TriggerEvent("onUserTyping", data)
+    elseif data.type == "user_block" then
+        self:TriggerEvent("onUserBlocked", data)
+        -- Update local block list
+        local blockList = UserManager:GetBlockedUsers()
+        if not table.find(blockList, data.username) then
+            table.insert(blockList, data.username)
+            UserManager:SetBlockedUsers(blockList)
+        end
+    elseif data.type == "user_unblock" then
+        self:TriggerEvent("onUserUnblocked", data)
+        -- Update local block list
+        local blockList = UserManager:GetBlockedUsers()
+        local index = table.find(blockList, data.username)
+        if index then
+            table.remove(blockList, index)
+            UserManager:SetBlockedUsers(blockList)
+        end
+    elseif data.type == "thread_created" then
+        self:TriggerEvent("onThreadCreated", data)
+    elseif data.type == "thread_message" then
+        self:TriggerEvent("onThreadMessage", data)
+    elseif data.type == "error" then
+        self:TriggerEvent("onError", data.message)
+        print("❌ Server error: " .. (data.message or "Unknown error"))
+    elseif data.type == "pong" then
+        -- Heartbeat response
+        networkState.lastPing = os.time()
+    elseif data.type == "token_refresh" then
+        -- Update authentication token
+        if data.token then
+            UserManager:SetAuthToken(data.token)
+            print("🔄 Authentication token refreshed")
+        end
+    else
+        print("⚠️ Unknown message type: " .. data.type)
+    end
 end
 
 function NetworkManager:DisconnectFromServer()
@@ -3050,6 +3466,24 @@ function NetworkManager:DisconnectFromServer()
     end
     
     networkState.isConnected = false
+    
+    -- Close WebSocket connection
+    if networkState.websocket then
+        -- Send disconnect message
+        local disconnectMessage = {
+            type = "disconnect",
+            userId = UserManager:GetUserId(),
+            reason = "User disconnected"
+        }
+        
+        -- Try to send disconnect message
+        pcall(function()
+            networkState.websocket:Send(HttpService:JSONEncode(disconnectMessage))
+            networkState.websocket:Close()
+        end)
+        
+        networkState.websocket = nil
+    end
     
     -- Stop heartbeat
     if networkState.heartbeatConnection then
@@ -3076,9 +3510,26 @@ function NetworkManager:SendMessage(messageData)
         return false, "Not connected - message queued"
     end
     
-    -- In production, this would send via WebSocket
-    self:SimulateSendMessage(messageData)
-    return true, "Message sent"
+    -- Send message via WebSocket
+    if networkState.websocket then
+        local messagePacket = {
+            type = "chat_message",
+            message = messageData
+        }
+        
+        local success, errorMsg = pcall(function()
+            networkState.websocket:Send(HttpService:JSONEncode(messagePacket))
+        end)
+        
+        if not success then
+            print("❌ Failed to send message: " .. tostring(errorMsg))
+            return false, "Failed to send message: " .. tostring(errorMsg)
+        end
+        
+        return true, "Message sent"
+    else
+        return false, "WebSocket connection not established"
+    end
 end
 
 function NetworkManager:SendPrivateMessage(messageData)
@@ -3091,11 +3542,60 @@ function NetworkManager:SendPrivateMessage(messageData)
         return false, "Not connected - message queued"
     end
     
-    self:SimulateSendPrivateMessage(messageData)
-    return true, "Private message sent"
+    -- Send private message via WebSocket
+    if networkState.websocket then
+        local messagePacket = {
+            type = "private_message",
+            message = messageData
+        }
+        
+        local success, errorMsg = pcall(function()
+            networkState.websocket:Send(HttpService:JSONEncode(messagePacket))
+        end)
+        
+        if not success then
+            print("❌ Failed to send private message: " .. tostring(errorMsg))
+            return false, "Failed to send private message: " .. tostring(errorMsg)
+        end
+        
+        return true, "Private message sent"
+    else
+        return false, "WebSocket connection not established"
+    end
 end
 
 function NetworkManager:SendAuthRequest(username, password, isSignup)
+    -- First, connect to WebSocket if not already connected
+    if not networkState.websocket then
+        self:ConnectToServer(Config.WEBSOCKET_URL)
+    end
+    
+    -- Send authentication via WebSocket
+    if networkState.websocket then
+        local authMessage = {
+            type = isSignup and "register" or "login",
+            username = username,
+            password = password,
+            executor = self:GetExecutorInfo(),
+            platform = self:GetPlatformInfo(),
+            timestamp = os.time()
+        }
+        
+        local success, errorMsg = pcall(function()
+            networkState.websocket:Send(HttpService:JSONEncode(authMessage))
+        end)
+        
+        if not success then
+            print("❌ Failed to send authentication request: " .. tostring(errorMsg))
+            self:TriggerEvent("onAuthError", {message = "Failed to send authentication request"})
+            return
+        end
+        
+        -- Authentication response will be handled by the WebSocket message handler
+        return
+    end
+    
+    -- Fallback to HTTP if WebSocket is not available
     local endpoint = isSignup and "/api/v1/auth/register" or "/api/v1/auth/login"
     local url = Config.API_BASE_URL .. endpoint
     
@@ -3136,50 +3636,130 @@ function NetworkManager:SendAuthRequest(username, password, isSignup)
     end)
 end
 
+-- These functions have been replaced with real WebSocket implementations
+-- and are no longer needed. The server will echo back messages via WebSocket.
 function NetworkManager:SimulateSendMessage(messageData)
-    -- Simulate network delay
-    spawn(function()
-        wait(math.random(0.1, 0.5))
-        
-        -- Simulate message echo back from server
-        local echoMessage = Utils:DeepCopy(messageData)
-        echoMessage.serverTimestamp = os.time()
-        
-        self:TriggerEvent("onMessage", echoMessage)
-    end)
+    -- This function is deprecated and only kept for backward compatibility
+    print("⚠️ Warning: Using deprecated SimulateSendMessage function")
+    -- No action needed as the server will echo back messages
 end
 
 function NetworkManager:SimulateSendPrivateMessage(messageData)
-    -- Simulate network delay
-    spawn(function()
-        wait(math.random(0.1, 0.5))
-        
-        -- Simulate message delivery confirmation
-        self:TriggerEvent("onPrivateMessageSent", messageData)
-    end)
+    -- This function is deprecated and only kept for backward compatibility
+    print("⚠️ Warning: Using deprecated SimulateSendPrivateMessage function")
+    -- No action needed as the server will handle private messages
 end
 
 function NetworkManager:StartHeartbeat()
+    -- Initialize token refresh timer
+    networkState.lastTokenRefresh = os.time()
+    
     networkState.heartbeatConnection = RunService.Heartbeat:Connect(function()
         local now = os.time()
+        
+        -- Handle heartbeat
         if now - networkState.lastPing >= Config.HEARTBEAT_INTERVAL then
             self:SendHeartbeat()
             networkState.lastPing = now
+        end
+        
+        -- Handle token refresh (every 30 minutes)
+        if UserManager:IsAuthenticated() and now - networkState.lastTokenRefresh >= 1800 then
+            self:RefreshToken()
+            networkState.lastTokenRefresh = now
         end
     end)
 end
 
 function NetworkManager:SendHeartbeat()
-    if not networkState.isConnected then
+    if not networkState.isConnected or not networkState.websocket then
         return
     end
+
+    -- Send real heartbeat via WebSocket
+    local heartbeatPacket = {
+        type = "ping",
+        userId = UserManager:GetUserId(),
+        timestamp = os.time()
+    }
     
-    -- Simulate heartbeat
-    spawn(function()
-        wait(0.1)
-        -- Heartbeat successful
-        print("💓 Heartbeat sent")
+    local success, errorMsg = pcall(function()
+        networkState.websocket:Send(HttpService:JSONEncode(heartbeatPacket))
     end)
+    
+    if success then
+        print("💓 Heartbeat sent")
+    else
+        print("❌ Failed to send heartbeat: " .. tostring(errorMsg))
+        -- If heartbeat fails, check connection status
+        self:CheckConnectionStatus()
+    end
+end
+
+function NetworkManager:CheckConnectionStatus()
+    -- If we haven't received a response in 2x the heartbeat interval, consider the connection dead
+    local now = os.time()
+    if now - networkState.lastPing > (Config.HEARTBEAT_INTERVAL * 2) then
+        print("⚠️ Connection appears to be dead, attempting to reconnect")
+        self:DisconnectFromServer()
+        self:HandleConnectionFailure()
+    end
+end
+
+function NetworkManager:RefreshToken()
+    if not UserManager:IsAuthenticated() then
+        return false, "Not authenticated"
+    end
+    
+    -- Send token refresh request via WebSocket
+    if networkState.websocket then
+        local refreshMessage = {
+            type = "token_refresh",
+            userId = UserManager:GetUserId(),
+            currentToken = UserManager:GetAuthToken(),
+            timestamp = os.time()
+        }
+        
+        local success, errorMsg = pcall(function()
+            networkState.websocket:Send(HttpService:JSONEncode(refreshMessage))
+        end)
+        
+        if not success then
+            print("❌ Failed to send token refresh request: " .. tostring(errorMsg))
+            return false, "Failed to send token refresh request"
+        end
+        
+        return true, "Token refresh request sent"
+    end
+    
+    -- Fallback to HTTP if WebSocket is not available
+    local url = Config.API_BASE_URL .. "/api/v1/auth/refresh"
+    local requestData = {
+        Url = url,
+        Method = "POST",
+        Headers = {
+            ["Content-Type"] = "application/json",
+            ["Authorization"] = "Bearer " .. UserManager:GetAuthToken()
+        },
+        Body = HttpService:JSONEncode({
+            userId = UserManager:GetUserId()
+        })
+    }
+    
+    local success, response = pcall(function()
+        return self.httpRequest(requestData)
+    end)
+    
+    if success and response.StatusCode == 200 then
+        local data = HttpService:JSONDecode(response.Body)
+        if data.token then
+            UserManager:SetAuthToken(data.token)
+            print("🔄 Authentication token refreshed")
+            return true, "Token refreshed"
+        end
+    end
+    
+    return false, "Failed to refresh token"
 end
 
 function NetworkManager:HandleConnectionFailure()
@@ -3608,6 +4188,20 @@ function NetworkManager:BlockUser(username)
         return false, "Not authenticated"
     end
 
+    -- First, send a WebSocket notification about the block
+    if networkState.websocket then
+        local blockNotification = {
+            type = "user_block",
+            username = username,
+            userId = UserManager:GetUserId()
+        }
+        
+        pcall(function()
+            networkState.websocket:Send(HttpService:JSONEncode(blockNotification))
+        end)
+    end
+
+    -- Then make the API call to persist the block
     local url = Config.API_BASE_URL .. "/api/v1/users/block"
     local requestData = {
         Url = url,
@@ -3638,6 +4232,20 @@ function NetworkManager:UnblockUser(username)
         return false, "Not authenticated"
     end
 
+    -- First, send a WebSocket notification about the unblock
+    if networkState.websocket then
+        local unblockNotification = {
+            type = "user_unblock",
+            username = username,
+            userId = UserManager:GetUserId()
+        }
+        
+        pcall(function()
+            networkState.websocket:Send(HttpService:JSONEncode(unblockNotification))
+        end)
+    end
+
+    -- Then make the API call to persist the unblock
     local url = Config.API_BASE_URL .. "/api/v1/users/unblock"
     local requestData = {
         Url = url,
@@ -4501,6 +5109,28 @@ function GlobalChat:CreateMobileInterface(parent, userConfig)
         end
     end)
     
+    -- Add settings button to mobile interface
+    local mobileSettingsButton = Instance.new("TextButton")
+    mobileSettingsButton.Name = "SettingsButton"
+    mobileSettingsButton.Size = UDim2.new(0, 40, 0, 40)
+    mobileSettingsButton.Position = UDim2.new(1, -50, 0, 10)
+    mobileSettingsButton.BackgroundColor3 = ThemeManager:GetCurrentTheme().accent
+    mobileSettingsButton.BorderSizePixel = 0
+    mobileSettingsButton.Text = "⚙️"
+    mobileSettingsButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    mobileSettingsButton.TextSize = 18
+    mobileSettingsButton.Font = Enum.Font.GothamBold
+    mobileSettingsButton.Parent = chatWindow
+    
+    local mobileSettingsCorner = Instance.new("UICorner")
+    mobileSettingsCorner.CornerRadius = UDim.new(0.5, 0)
+    mobileSettingsCorner.Parent = mobileSettingsButton
+    
+    -- Connect settings button
+    mobileSettingsButton.MouseButton1Click:Connect(function()
+        showSettingsMenu()
+    end)
+    
     -- Add basic chat elements
     self:AddChatElements(chatWindow, userConfig)
 end
@@ -4533,6 +5163,28 @@ function GlobalChat:CreateDesktopInterface(parent, userConfig)
     local titleCorner = Instance.new("UICorner")
     titleCorner.CornerRadius = UDim.new(0, 8)
     titleCorner.Parent = titleBar
+    
+    -- Settings button
+    local settingsButton = Instance.new("TextButton")
+    settingsButton.Name = "SettingsButton"
+    settingsButton.Size = UDim2.new(0, 30, 0, 30)
+    settingsButton.Position = UDim2.new(1, -40, 0.5, -15)
+    settingsButton.BackgroundColor3 = ThemeManager:GetCurrentTheme().accent
+    settingsButton.BorderSizePixel = 0
+    settingsButton.Text = "⚙️"
+    settingsButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    settingsButton.TextSize = 16
+    settingsButton.Font = Enum.Font.GothamBold
+    settingsButton.Parent = titleBar
+    
+    local settingsCorner = Instance.new("UICorner")
+    settingsCorner.CornerRadius = UDim.new(0, 6)
+    settingsCorner.Parent = settingsButton
+    
+    -- Connect settings button
+    settingsButton.MouseButton1Click:Connect(function()
+        showSettingsMenu()
+    end)
     
     -- Fix title bar corners
     local titleFix = Instance.new("Frame")
@@ -5031,6 +5683,45 @@ end
 
 -- Show authentication screen
 function GlobalChat:ShowAuthenticationScreen()
+    -- Check for saved credentials first
+    local savedCredentials = UserManager:GetSavedCredentials()
+    if savedCredentials then
+        print("🔑 Found saved credentials for user: " .. savedCredentials.username)
+        
+        -- Attempt auto-login with saved credentials
+        local function attemptAutoLogin()
+            -- Set up auth response handler
+            NetworkManager:On("onAuthResponse", function(success, data)
+                if success then
+                    print("✅ Auto-login successful!")
+                    UserManager:LoginSuccess(data)
+                    
+                    -- Check if user needs to complete setup
+                    local userConfig = UserManager:GetUserConfig()
+                    if not userConfig.setupComplete then
+                        GlobalChat:ShowSetupWizard()
+                    else
+                        GlobalChat:Initialize()
+                    end
+                else
+                    print("❌ Auto-login failed, showing login screen")
+                    -- Clear saved credentials as they might be invalid
+                    UserManager:ClearSavedCredentials()
+                    -- Show the regular login screen
+                    GlobalChat:ShowAuthenticationScreen()
+                end
+            end)
+            
+            -- Send authentication request
+            NetworkManager:SendAuthRequest(savedCredentials.username, savedCredentials.password, false)
+        end
+        
+        -- Try auto-login
+        spawn(attemptAutoLogin)
+        return
+    end
+    
+    -- Regular authentication screen if no saved credentials
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "GlobalChatAuth"
     screenGui.ResetOnSpawn = false
@@ -5160,6 +5851,55 @@ function GlobalChat:ShowAuthenticationScreen()
     statusLabel.TextXAlignment = Enum.TextXAlignment.Center
     statusLabel.Parent = contentFrame
     
+    -- Remember Me checkbox
+    local rememberMeFrame = Instance.new("Frame")
+    rememberMeFrame.Name = "RememberMeFrame"
+    rememberMeFrame.Size = UDim2.new(1, 0, 0, 30)
+    rememberMeFrame.Position = UDim2.new(0, 0, 0, 200)
+    rememberMeFrame.BackgroundTransparency = 1
+    rememberMeFrame.Parent = contentFrame
+    
+    local rememberMeCheckbox = Instance.new("ImageButton")
+    rememberMeCheckbox.Name = "RememberMeCheckbox"
+    rememberMeCheckbox.Size = UDim2.new(0, 20, 0, 20)
+    rememberMeCheckbox.Position = UDim2.new(0, 0, 0, 5)
+    rememberMeCheckbox.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    rememberMeCheckbox.BorderSizePixel = 0
+    rememberMeCheckbox.Parent = rememberMeFrame
+    
+    local checkboxCorner = Instance.new("UICorner")
+    checkboxCorner.CornerRadius = UDim.new(0, 4)
+    checkboxCorner.Parent = rememberMeCheckbox
+    
+    local checkmark = Instance.new("ImageLabel")
+    checkmark.Name = "Checkmark"
+    checkmark.Size = UDim2.new(0.8, 0, 0.8, 0)
+    checkmark.Position = UDim2.new(0.1, 0, 0.1, 0)
+    checkmark.BackgroundTransparency = 1
+    checkmark.Image = "rbxassetid://6031094667" -- Checkmark icon
+    checkmark.ImageColor3 = ThemeManager:GetCurrentTheme().accent
+    checkmark.Visible = false
+    checkmark.Parent = rememberMeCheckbox
+    
+    local rememberMeLabel = Instance.new("TextLabel")
+    rememberMeLabel.Name = "RememberMeLabel"
+    rememberMeLabel.Size = UDim2.new(0, 200, 0, 20)
+    rememberMeLabel.Position = UDim2.new(0, 30, 0, 5)
+    rememberMeLabel.BackgroundTransparency = 1
+    rememberMeLabel.Text = "Remember me on this device"
+    rememberMeLabel.TextColor3 = ThemeManager:GetCurrentTheme().textPrimary
+    rememberMeLabel.TextSize = 14
+    rememberMeLabel.Font = Enum.Font.Gotham
+    rememberMeLabel.TextXAlignment = Enum.TextXAlignment.Left
+    rememberMeLabel.Parent = rememberMeFrame
+    
+    -- Remember Me toggle functionality
+    local rememberMeEnabled = false
+    rememberMeCheckbox.MouseButton1Click:Connect(function()
+        rememberMeEnabled = not rememberMeEnabled
+        checkmark.Visible = rememberMeEnabled
+    end)
+    
     -- Login button
     local loginButton = Instance.new("TextButton")
     loginButton.Name = "LoginButton"
@@ -5195,11 +5935,64 @@ function GlobalChat:ShowAuthenticationScreen()
     registerCorner.CornerRadius = UDim.new(0, 8)
     registerCorner.Parent = registerButton
     
+    -- Remember Me checkbox
+    local rememberMeFrame = Instance.new("Frame")
+    rememberMeFrame.Name = "RememberMeFrame"
+    rememberMeFrame.Size = UDim2.new(1, 0, 0, 30)
+    rememberMeFrame.Position = UDim2.new(0, 0, 0, 360)
+    rememberMeFrame.BackgroundTransparency = 1
+    rememberMeFrame.Parent = contentFrame
+    
+    local rememberMeCheckbox = Instance.new("TextButton")
+    rememberMeCheckbox.Name = "RememberMeCheckbox"
+    rememberMeCheckbox.Size = UDim2.new(0, 20, 0, 20)
+    rememberMeCheckbox.Position = UDim2.new(0, 0, 0.5, -10)
+    rememberMeCheckbox.BackgroundColor3 = ThemeManager:GetCurrentTheme().secondary
+    rememberMeCheckbox.BorderSizePixel = 1
+    rememberMeCheckbox.BorderColor3 = ThemeManager:GetCurrentTheme().accent
+    rememberMeCheckbox.Text = ""
+    rememberMeCheckbox.Parent = rememberMeFrame
+    
+    local checkboxCorner = Instance.new("UICorner")
+    checkboxCorner.CornerRadius = UDim.new(0, 4)
+    checkboxCorner.Parent = rememberMeCheckbox
+    
+    local checkmark = Instance.new("TextLabel")
+    checkmark.Name = "Checkmark"
+    checkmark.Size = UDim2.new(1, 0, 1, 0)
+    checkmark.BackgroundTransparency = 1
+    checkmark.Text = "✓"
+    checkmark.TextColor3 = ThemeManager:GetCurrentTheme().accent
+    checkmark.TextSize = 16
+    checkmark.Font = Enum.Font.GothamBold
+    checkmark.Visible = false
+    checkmark.Parent = rememberMeCheckbox
+    
+    local rememberMeLabel = Instance.new("TextLabel")
+    rememberMeLabel.Name = "RememberMeLabel"
+    rememberMeLabel.Size = UDim2.new(1, -30, 1, 0)
+    rememberMeLabel.Position = UDim2.new(0, 30, 0, 0)
+    rememberMeLabel.BackgroundTransparency = 1
+    rememberMeLabel.Text = "Remember Me"
+    rememberMeLabel.TextColor3 = ThemeManager:GetCurrentTheme().text
+    rememberMeLabel.TextSize = 14
+    rememberMeLabel.Font = Enum.Font.Gotham
+    rememberMeLabel.TextXAlignment = Enum.TextXAlignment.Left
+    rememberMeLabel.Parent = rememberMeFrame
+    
+    -- Remember Me state
+    local rememberMeEnabled = false
+    
+    rememberMeCheckbox.MouseButton1Click:Connect(function()
+        rememberMeEnabled = not rememberMeEnabled
+        checkmark.Visible = rememberMeEnabled
+    end)
+    
     -- Skip button (for offline mode)
     local skipButton = Instance.new("TextButton")
     skipButton.Name = "SkipButton"
     skipButton.Size = UDim2.new(1, 0, 0, 40)
-    skipButton.Position = UDim2.new(0, 0, 0, 360)
+    skipButton.Position = UDim2.new(0, 0, 0, 400)
     skipButton.BackgroundTransparency = 1
     skipButton.Text = "Continue without account (Limited features)"
     skipButton.TextColor3 = ThemeManager:GetCurrentTheme().textMuted
@@ -5240,6 +6033,12 @@ function GlobalChat:ShowAuthenticationScreen()
         NetworkManager:On("onAuthResponse", function(success, data)
             if success then
                 showStatus("Authentication successful!", false)
+                
+                -- Save credentials if "Remember Me" is checked and not signing up
+                if rememberMeEnabled and not isSignup then
+                    UserManager:SaveCredentials(username, password, true)
+                end
+                
                 UserManager:LoginSuccess(data)
                 
                 -- Check if user needs to complete setup
@@ -5323,6 +6122,13 @@ GlobalChat.modules = {
 }
 
 -- Auto-initialize when script is loaded
+-- Check for saved credentials first
+local savedCredentials = UserManager:GetSavedCredentials()
+if savedCredentials then
+    print("🔄 Found saved credentials for user: " .. savedCredentials.username)
+    print("🔑 Attempting auto-login...")
+end
+
 GlobalChat:Initialize()
 
 -- Return the main object for external access
