@@ -141,9 +141,9 @@ local Config = {
     -- Mobile UI Specific
     MOBILE = {
         FLOATING_BUTTON_SIZE = UDim2.new(0, 60, 0, 60),
-        FLOATING_BUTTON_POSITION = UDim2.new(1, -80, 1, -80),
+        FLOATING_BUTTON_POSITION = UDim2.new(1, -80, 1, -120),
         NOTIFICATION_BADGE_SIZE = UDim2.new(0, 20, 0, 20),
-        CHAT_WINDOW_SIZE = UDim2.new(0.95, 0, 0.8, 0),
+        CHAT_WINDOW_SIZE = UDim2.new(0.9, 0, 0.7, 0),
         KEYBOARD_OFFSET = 200
     },
     
@@ -5019,6 +5019,29 @@ function GlobalChat:CreateSetupWizard()
     title.TextSize = 24
     title.Font = Enum.Font.GothamBold
     title.Parent = mainFrame
+
+    -- Back button
+    local backButton = Instance.new("TextButton")
+    backButton.Name = "BackButton"
+    backButton.Size = UDim2.new(0, 40, 0, 40)
+    backButton.Position = UDim2.new(0, 10, 0, 10)
+    backButton.BackgroundColor3 = ThemeManager:GetCurrentTheme().secondary
+    backButton.BorderSizePixel = 0
+    backButton.Text = "←"
+    backButton.TextColor3 = ThemeManager:GetCurrentTheme().text
+    backButton.TextSize = 20
+    backButton.Font = Enum.Font.GothamBold
+    backButton.Parent = mainFrame
+
+    local backCorner = Instance.new("UICorner")
+    backCorner.CornerRadius = UDim.new(0, 8)
+    backCorner.Parent = backButton
+
+    -- Back button click handler
+    backButton.MouseButton1Click:Connect(function()
+        screenGui:Destroy()
+        self:ShowPlatformSelection()
+    end)
     
     -- Content area
     local contentFrame = Instance.new("Frame")
@@ -5088,7 +5111,8 @@ function GlobalChat:CreateMobileInterface(parent, userConfig)
     local chatWindow = Instance.new("Frame")
     chatWindow.Name = "ChatWindow"
     chatWindow.Size = Config.MOBILE.CHAT_WINDOW_SIZE
-    chatWindow.Position = UDim2.new(0.025, 0, 0.1, 0)
+    chatWindow.Position = UDim2.new(0.5, 0, 0.5, 0)
+    chatWindow.AnchorPoint = Vector2.new(0.5, 0.5)
     chatWindow.BackgroundColor3 = ThemeManager:GetCurrentTheme().primary
     chatWindow.BorderSizePixel = 0
     chatWindow.Visible = false
@@ -5097,6 +5121,34 @@ function GlobalChat:CreateMobileInterface(parent, userConfig)
     local windowCorner = Instance.new("UICorner")
     windowCorner.CornerRadius = UDim.new(0, 12)
     windowCorner.Parent = chatWindow
+
+    -- Make window draggable
+    local dragStart = nil
+    local startPos = nil
+    
+    chatWindow.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragStart = input.Position
+            startPos = chatWindow.Position
+        end
+    end)
+    
+    chatWindow.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            if dragStart then
+                local delta = input.Position - dragStart
+                chatWindow.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            end
+        end
+    end)
+    
+    chatWindow.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragStart = nil
+        end
+    end)
+
+
     
     -- Toggle functionality
     local isOpen = false
@@ -5109,11 +5161,33 @@ function GlobalChat:CreateMobileInterface(parent, userConfig)
         end
     end)
     
+    -- Add close button to mobile interface
+    local mobileCloseButton = Instance.new("TextButton")
+    mobileCloseButton.Name = "CloseButton"
+    mobileCloseButton.Size = UDim2.new(0, 40, 0, 40)
+    mobileCloseButton.Position = UDim2.new(1, -50, 0, 10)
+    mobileCloseButton.BackgroundColor3 = Color3.fromRGB(220, 53, 69)
+    mobileCloseButton.BorderSizePixel = 0
+    mobileCloseButton.Text = "✕"
+    mobileCloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    mobileCloseButton.TextSize = 18
+    mobileCloseButton.Font = Enum.Font.GothamBold
+    mobileCloseButton.Parent = chatWindow
+
+    local mobileCloseCorner = Instance.new("UICorner")
+    mobileCloseCorner.CornerRadius = UDim.new(0.5, 0)
+    mobileCloseCorner.Parent = mobileCloseButton
+
+    mobileCloseButton.MouseButton1Click:Connect(function()
+        isOpen = false
+        chatWindow.Visible = false
+    end)
+
     -- Add settings button to mobile interface
     local mobileSettingsButton = Instance.new("TextButton")
     mobileSettingsButton.Name = "SettingsButton"
     mobileSettingsButton.Size = UDim2.new(0, 40, 0, 40)
-    mobileSettingsButton.Position = UDim2.new(1, -50, 0, 10)
+    mobileSettingsButton.Position = UDim2.new(1, -100, 0, 10)
     mobileSettingsButton.BackgroundColor3 = ThemeManager:GetCurrentTheme().accent
     mobileSettingsButton.BorderSizePixel = 0
     mobileSettingsButton.Text = "⚙️"
@@ -5130,6 +5204,37 @@ function GlobalChat:CreateMobileInterface(parent, userConfig)
     mobileSettingsButton.MouseButton1Click:Connect(function()
         showSettingsMenu()
     end)
+
+    -- Add drag functionality to mobile chat window
+    local function makeDraggable(frame)
+        local dragging = false
+        local dragStart = nil
+        local startPos = nil
+
+        frame.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                dragging = true
+                dragStart = input.Position
+                startPos = frame.Position
+            end
+        end)
+
+        frame.InputChanged:Connect(function(input)
+            if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+                local delta = input.Position - dragStart
+                frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            end
+        end)
+
+        frame.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                dragging = false
+            end
+        end)
+    end
+
+    -- Make the chat window draggable
+    makeDraggable(chatWindow)
     
     -- Add basic chat elements
     self:AddChatElements(chatWindow, userConfig)
@@ -5493,11 +5598,11 @@ function GlobalChat:ShowPlatformSelection()
     screenGui.ResetOnSpawn = false
     screenGui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
 
-    -- Main container
+    -- Main container - Mobile responsive
     local mainFrame = Instance.new("Frame")
     mainFrame.Name = "PlatformContainer"
-    mainFrame.Size = UDim2.new(0, 500, 0, 400)
-    mainFrame.Position = UDim2.new(0.5, -250, 0.5, -200)
+    mainFrame.Size = UDim2.new(0.9, 0, 0.6, 0)
+    mainFrame.Position = UDim2.new(0.05, 0, 0.2, 0)
     mainFrame.BackgroundColor3 = ThemeManager:GetCurrentTheme().primary
     mainFrame.BorderSizePixel = 0
     mainFrame.Parent = screenGui
@@ -5507,10 +5612,31 @@ function GlobalChat:ShowPlatformSelection()
     corner.CornerRadius = UDim.new(0, 12)
     corner.Parent = mainFrame
 
+    -- Close button
+    local closeButton = Instance.new("TextButton")
+    closeButton.Name = "CloseButton"
+    closeButton.Size = UDim2.new(0, 40, 0, 40)
+    closeButton.Position = UDim2.new(1, -50, 0, 10)
+    closeButton.BackgroundColor3 = Color3.fromRGB(220, 53, 69)
+    closeButton.BorderSizePixel = 0
+    closeButton.Text = "✕"
+    closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeButton.TextSize = 18
+    closeButton.Font = Enum.Font.GothamBold
+    closeButton.Parent = mainFrame
+
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.CornerRadius = UDim.new(0, 20)
+    closeCorner.Parent = closeButton
+
+    closeButton.MouseButton1Click:Connect(function()
+        screenGui:Destroy()
+    end)
+
     -- Title
     local title = Instance.new("TextLabel")
     title.Name = "Title"
-    title.Size = UDim2.new(1, 0, 0, 80)
+    title.Size = UDim2.new(1, -100, 0, 80)
     title.Position = UDim2.new(0, 0, 0, 0)
     title.BackgroundTransparency = 1
     title.Text = "Global Executor Chat"
@@ -5629,11 +5755,11 @@ function GlobalChat:ShowCountrySelectionScreen()
     screenGui.ResetOnSpawn = false
     screenGui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
 
-    -- Main container
+    -- Main container - Mobile responsive
     local mainFrame = Instance.new("Frame")
     mainFrame.Name = "CountryContainer"
-    mainFrame.Size = UDim2.new(0, 600, 0, 500)
-    mainFrame.Position = UDim2.new(0.5, -300, 0.5, -250)
+    mainFrame.Size = UDim2.new(0.9, 0, 0.8, 0)
+    mainFrame.Position = UDim2.new(0.05, 0, 0.1, 0)
     mainFrame.BackgroundColor3 = ThemeManager:GetCurrentTheme().primary
     mainFrame.BorderSizePixel = 0
     mainFrame.Parent = screenGui
@@ -5643,10 +5769,31 @@ function GlobalChat:ShowCountrySelectionScreen()
     corner.CornerRadius = UDim.new(0, 12)
     corner.Parent = mainFrame
 
+    -- Close button
+    local closeButton = Instance.new("TextButton")
+    closeButton.Name = "CloseButton"
+    closeButton.Size = UDim2.new(0, 40, 0, 40)
+    closeButton.Position = UDim2.new(1, -50, 0, 10)
+    closeButton.BackgroundColor3 = Color3.fromRGB(220, 53, 69)
+    closeButton.BorderSizePixel = 0
+    closeButton.Text = "✕"
+    closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeButton.TextSize = 18
+    closeButton.Font = Enum.Font.GothamBold
+    closeButton.Parent = mainFrame
+
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.CornerRadius = UDim.new(0, 20)
+    closeCorner.Parent = closeButton
+
+    closeButton.MouseButton1Click:Connect(function()
+        screenGui:Destroy()
+    end)
+
     -- Title
     local title = Instance.new("TextLabel")
     title.Name = "Title"
-    title.Size = UDim2.new(1, 0, 0, 60)
+    title.Size = UDim2.new(1, -100, 0, 60)
     title.Position = UDim2.new(0, 0, 0, 0)
     title.BackgroundTransparency = 1
     title.Text = "Select Your Country"
@@ -5655,6 +5802,29 @@ function GlobalChat:ShowCountrySelectionScreen()
     title.Font = Enum.Font.GothamBold
     title.TextXAlignment = Enum.TextXAlignment.Center
     title.Parent = mainFrame
+
+    -- Back button
+    local backButton = Instance.new("TextButton")
+    backButton.Name = "BackButton"
+    backButton.Size = UDim2.new(0, 40, 0, 40)
+    backButton.Position = UDim2.new(0, 10, 0, 10)
+    backButton.BackgroundColor3 = ThemeManager:GetCurrentTheme().secondary
+    backButton.BorderSizePixel = 0
+    backButton.Text = "←"
+    backButton.TextColor3 = ThemeManager:GetCurrentTheme().text
+    backButton.TextSize = 20
+    backButton.Font = Enum.Font.GothamBold
+    backButton.Parent = mainFrame
+
+    local backCorner = Instance.new("UICorner")
+    backCorner.CornerRadius = UDim.new(0, 8)
+    backCorner.Parent = backButton
+
+    -- Back button click handler
+    backButton.MouseButton1Click:Connect(function()
+        screenGui:Destroy()
+        self:ShowPlatformSelection()
+    end)
 
     -- Search box
     local searchBox = Instance.new("TextBox")
@@ -5780,8 +5950,9 @@ function GlobalChat:ShowLanguageSelectionScreen(countryCode)
     -- Main container
     local mainFrame = Instance.new("Frame")
     mainFrame.Name = "LanguageContainer"
-    mainFrame.Size = UDim2.new(0, 500, 0, 400)
-    mainFrame.Position = UDim2.new(0.5, -250, 0.5, -200)
+    mainFrame.Size = UDim2.new(0.9, 0, 0.6, 0)
+    mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+    mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
     mainFrame.BackgroundColor3 = ThemeManager:GetCurrentTheme().primary
     mainFrame.BorderSizePixel = 0
     mainFrame.Parent = screenGui
@@ -5791,10 +5962,31 @@ function GlobalChat:ShowLanguageSelectionScreen(countryCode)
     corner.CornerRadius = UDim.new(0, 12)
     corner.Parent = mainFrame
 
+    -- Close button
+    local closeButton = Instance.new("TextButton")
+    closeButton.Name = "CloseButton"
+    closeButton.Size = UDim2.new(0, 40, 0, 40)
+    closeButton.Position = UDim2.new(1, -50, 0, 10)
+    closeButton.BackgroundColor3 = Color3.fromRGB(220, 53, 69)
+    closeButton.BorderSizePixel = 0
+    closeButton.Text = "✕"
+    closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeButton.TextSize = 18
+    closeButton.Font = Enum.Font.GothamBold
+    closeButton.Parent = mainFrame
+
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.CornerRadius = UDim.new(0, 20)
+    closeCorner.Parent = closeButton
+
+    closeButton.MouseButton1Click:Connect(function()
+        screenGui:Destroy()
+    end)
+
     -- Title
     local title = Instance.new("TextLabel")
     title.Name = "Title"
-    title.Size = UDim2.new(1, 0, 0, 60)
+    title.Size = UDim2.new(1, -100, 0, 60)
     title.Position = UDim2.new(0, 0, 0, 0)
     title.BackgroundTransparency = 1
     title.Text = "Select Your Language"
@@ -5803,6 +5995,29 @@ function GlobalChat:ShowLanguageSelectionScreen(countryCode)
     title.Font = Enum.Font.GothamBold
     title.TextXAlignment = Enum.TextXAlignment.Center
     title.Parent = mainFrame
+
+    -- Back button
+    local backButton = Instance.new("TextButton")
+    backButton.Name = "BackButton"
+    backButton.Size = UDim2.new(0, 40, 0, 40)
+    backButton.Position = UDim2.new(0, 10, 0, 10)
+    backButton.BackgroundColor3 = ThemeManager:GetCurrentTheme().secondary
+    backButton.BorderSizePixel = 0
+    backButton.Text = "←"
+    backButton.TextColor3 = ThemeManager:GetCurrentTheme().text
+    backButton.TextSize = 20
+    backButton.Font = Enum.Font.GothamBold
+    backButton.Parent = mainFrame
+
+    local backCorner = Instance.new("UICorner")
+    backCorner.CornerRadius = UDim.new(0, 8)
+    backCorner.Parent = backButton
+
+    -- Back button click handler
+    backButton.MouseButton1Click:Connect(function()
+        screenGui:Destroy()
+        self:ShowCountrySelectionScreen()
+    end)
 
     -- Get languages for selected country
     local selectedCountry = Config:GetCountryByCode(countryCode)
@@ -6117,8 +6332,9 @@ function GlobalChat:ShowAuthenticationScreen()
     -- Main container
     local mainFrame = Instance.new("Frame")
     mainFrame.Name = "AuthContainer"
-    mainFrame.Size = UDim2.new(0, 500, 0, 600)
-    mainFrame.Position = UDim2.new(0.5, -250, 0.5, -300)
+    mainFrame.Size = UDim2.new(0.9, 0, 0.7, 0)
+    mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+    mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
     mainFrame.BackgroundColor3 = ThemeManager:GetCurrentTheme().primary
     mainFrame.BorderSizePixel = 0
     mainFrame.Parent = screenGui
@@ -6128,10 +6344,31 @@ function GlobalChat:ShowAuthenticationScreen()
     corner.CornerRadius = UDim.new(0, 12)
     corner.Parent = mainFrame
     
+    -- Close button
+    local closeButton = Instance.new("TextButton")
+    closeButton.Name = "CloseButton"
+    closeButton.Size = UDim2.new(0, 40, 0, 40)
+    closeButton.Position = UDim2.new(1, -50, 0, 10)
+    closeButton.BackgroundColor3 = Color3.fromRGB(220, 53, 69)
+    closeButton.BorderSizePixel = 0
+    closeButton.Text = "✕"
+    closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeButton.TextSize = 18
+    closeButton.Font = Enum.Font.GothamBold
+    closeButton.Parent = mainFrame
+
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.CornerRadius = UDim.new(0, 20)
+    closeCorner.Parent = closeButton
+
+    closeButton.MouseButton1Click:Connect(function()
+        screenGui:Destroy()
+    end)
+    
     -- Title
     local title = Instance.new("TextLabel")
     title.Name = "Title"
-    title.Size = UDim2.new(1, 0, 0, 80)
+    title.Size = UDim2.new(1, -100, 0, 80)
     title.Position = UDim2.new(0, 0, 0, 0)
     title.BackgroundTransparency = 1
     title.Text = "Global Executor Chat"
@@ -6157,7 +6394,7 @@ function GlobalChat:ShowAuthenticationScreen()
     -- Content area
     local contentFrame = Instance.new("Frame")
     contentFrame.Name = "Content"
-    contentFrame.Size = UDim2.new(1, -60, 1, -180)
+    contentFrame.Size = UDim2.new(1, -60, 1, -140)
     contentFrame.Position = UDim2.new(0, 30, 0, 120)
     contentFrame.BackgroundTransparency = 1
     contentFrame.Parent = mainFrame
