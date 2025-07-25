@@ -140,11 +140,11 @@ local Config = {
     
     -- Mobile UI Specific
     MOBILE = {
-        FLOATING_BUTTON_SIZE = UDim2.new(0, 60, 0, 60),
-        FLOATING_BUTTON_POSITION = UDim2.new(1, -80, 1, -120),
-        NOTIFICATION_BADGE_SIZE = UDim2.new(0, 20, 0, 20),
-        CHAT_WINDOW_SIZE = UDim2.new(0.9, 0, 0.7, 0),
-        KEYBOARD_OFFSET = 200
+        FLOATING_BUTTON_SIZE = UDim2.new(0, 50, 0, 50),
+        FLOATING_BUTTON_POSITION = UDim2.new(1, -70, 1, -100),
+        NOTIFICATION_BADGE_SIZE = UDim2.new(0, 16, 0, 16),
+        CHAT_WINDOW_SIZE = UDim2.new(0.8, 0, 0.6, 0),
+        KEYBOARD_OFFSET = 180
     },
     
     -- Desktop UI Specific
@@ -4971,14 +4971,20 @@ end
 
 -- Detect platform
 function GlobalChat:DetectPlatform()
+    -- First check for explicit mobile devices
     if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
         return "Mobile"
     elseif UserInputService.KeyboardEnabled and UserInputService.MouseEnabled then
-        return "PC"
-    else
-        -- Fallback detection
+        -- Check screen size even for PC devices - small windows should use mobile UI
         local screenSize = GuiService:GetScreenResolution()
-        
+        if screenSize.X < 1024 or screenSize.Y < 768 then
+            return "Mobile"  -- Small screen PC should use mobile UI
+        else
+            return "PC"
+        end
+    else
+        -- Fallback detection based on screen size
+        local screenSize = GuiService:GetScreenResolution()
         if screenSize.X < 1024 or screenSize.Y < 768 then
             return "Mobile"
         else
@@ -5098,7 +5104,7 @@ function GlobalChat:CreateMobileInterface(parent, userConfig)
     floatingButton.BorderSizePixel = 0
     floatingButton.Text = "💬"
     floatingButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    floatingButton.TextSize = 24
+    floatingButton.TextSize = 20
     floatingButton.Font = Enum.Font.GothamBold
     floatingButton.Parent = parent
     
@@ -5119,7 +5125,7 @@ function GlobalChat:CreateMobileInterface(parent, userConfig)
     chatWindow.Parent = parent
     
     local windowCorner = Instance.new("UICorner")
-    windowCorner.CornerRadius = UDim.new(0, 12)
+    windowCorner.CornerRadius = UDim.new(0, 10)
     windowCorner.Parent = chatWindow
 
     -- Make window draggable
@@ -5154,23 +5160,69 @@ function GlobalChat:CreateMobileInterface(parent, userConfig)
     local isOpen = false
     floatingButton.MouseButton1Click:Connect(function()
         isOpen = not isOpen
-        chatWindow.Visible = isOpen
         
         if isOpen then
-            Utils:SlideIn(chatWindow, "up")
+            -- Position the chat window properly for mobile
+            chatWindow.Position = UDim2.new(0.5, 0, 0.5, 0)
+            chatWindow.AnchorPoint = Vector2.new(0.5, 0.5)
+            chatWindow.Visible = true
+            
+            -- Animate the window opening
+            chatWindow.Size = UDim2.new(0, 0, 0, 0)
+            chatWindow.BackgroundTransparency = 1
+            
+            -- Animation sequence
+            TweenService:Create(chatWindow, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+                Size = Config.MOBILE.CHAT_WINDOW_SIZE,
+                BackgroundTransparency = 0
+            }):Play()
+        else
+            -- Animate closing
+            local closeTween = TweenService:Create(chatWindow, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+                Size = UDim2.new(0, 0, 0, 0),
+                BackgroundTransparency = 1
+            })
+            
+            closeTween.Completed:Connect(function()
+                chatWindow.Visible = false
+            end)
+            
+            closeTween:Play()
         end
     end)
     
+    -- Add minimize button to mobile interface
+    local mobileMinimizeButton = Instance.new("TextButton")
+    mobileMinimizeButton.Name = "MinimizeButton"
+    mobileMinimizeButton.Size = UDim2.new(0, 30, 0, 30)
+    mobileMinimizeButton.Position = UDim2.new(1, -80, 0, 10)
+    mobileMinimizeButton.BackgroundColor3 = Color3.fromRGB(255, 193, 7)
+    mobileMinimizeButton.BorderSizePixel = 0
+    mobileMinimizeButton.Text = "−"
+    mobileMinimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    mobileMinimizeButton.TextSize = 16
+    mobileMinimizeButton.Font = Enum.Font.GothamBold
+    mobileMinimizeButton.Parent = chatWindow
+
+    local mobileMinimizeCorner = Instance.new("UICorner")
+    mobileMinimizeCorner.CornerRadius = UDim.new(0.5, 0)
+    mobileMinimizeCorner.Parent = mobileMinimizeButton
+
+    mobileMinimizeButton.MouseButton1Click:Connect(function()
+        isOpen = false
+        chatWindow.Visible = false
+    end)
+
     -- Add close button to mobile interface
     local mobileCloseButton = Instance.new("TextButton")
     mobileCloseButton.Name = "CloseButton"
-    mobileCloseButton.Size = UDim2.new(0, 40, 0, 40)
-    mobileCloseButton.Position = UDim2.new(1, -50, 0, 10)
+    mobileCloseButton.Size = UDim2.new(0, 30, 0, 30)
+    mobileCloseButton.Position = UDim2.new(1, -40, 0, 10)
     mobileCloseButton.BackgroundColor3 = Color3.fromRGB(220, 53, 69)
     mobileCloseButton.BorderSizePixel = 0
     mobileCloseButton.Text = "✕"
     mobileCloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    mobileCloseButton.TextSize = 18
+    mobileCloseButton.TextSize = 16
     mobileCloseButton.Font = Enum.Font.GothamBold
     mobileCloseButton.Parent = chatWindow
 
@@ -5186,13 +5238,13 @@ function GlobalChat:CreateMobileInterface(parent, userConfig)
     -- Add settings button to mobile interface
     local mobileSettingsButton = Instance.new("TextButton")
     mobileSettingsButton.Name = "SettingsButton"
-    mobileSettingsButton.Size = UDim2.new(0, 40, 0, 40)
-    mobileSettingsButton.Position = UDim2.new(1, -100, 0, 10)
+    mobileSettingsButton.Size = UDim2.new(0, 30, 0, 30)
+    mobileSettingsButton.Position = UDim2.new(1, -120, 0, 10)
     mobileSettingsButton.BackgroundColor3 = ThemeManager:GetCurrentTheme().accent
     mobileSettingsButton.BorderSizePixel = 0
     mobileSettingsButton.Text = "⚙️"
     mobileSettingsButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    mobileSettingsButton.TextSize = 18
+    mobileSettingsButton.TextSize = 16
     mobileSettingsButton.Font = Enum.Font.GothamBold
     mobileSettingsButton.Parent = chatWindow
     
@@ -5269,11 +5321,32 @@ function GlobalChat:CreateDesktopInterface(parent, userConfig)
     titleCorner.CornerRadius = UDim.new(0, 8)
     titleCorner.Parent = titleBar
     
+    -- Fix title bar corners
+    local titleFix = Instance.new("Frame")
+    titleFix.Size = UDim2.new(1, 0, 0, 8)
+    titleFix.Position = UDim2.new(0, 0, 1, -8)
+    titleFix.BackgroundColor3 = titleBar.BackgroundColor3
+    titleFix.BorderSizePixel = 0
+    titleFix.Parent = titleBar
+    
+    -- Window title
+    local title = Instance.new("TextLabel")
+    title.Name = "Title"
+    title.Size = UDim2.new(1, -160, 1, 0)
+    title.Position = UDim2.new(0, 15, 0, 0)
+    title.BackgroundTransparency = 1
+    title.Text = "Global Executor Chat - " .. (userConfig.language or "English")
+    title.TextColor3 = ThemeManager:GetCurrentTheme().text
+    title.TextSize = 16
+    title.Font = Enum.Font.GothamBold
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = titleBar
+    
     -- Settings button
     local settingsButton = Instance.new("TextButton")
     settingsButton.Name = "SettingsButton"
     settingsButton.Size = UDim2.new(0, 30, 0, 30)
-    settingsButton.Position = UDim2.new(1, -40, 0.5, -15)
+    settingsButton.Position = UDim2.new(1, -120, 0.5, -15)
     settingsButton.BackgroundColor3 = ThemeManager:GetCurrentTheme().accent
     settingsButton.BorderSizePixel = 0
     settingsButton.Text = "⚙️"
@@ -5291,26 +5364,80 @@ function GlobalChat:CreateDesktopInterface(parent, userConfig)
         showSettingsMenu()
     end)
     
-    -- Fix title bar corners
-    local titleFix = Instance.new("Frame")
-    titleFix.Size = UDim2.new(1, 0, 0, 8)
-    titleFix.Position = UDim2.new(0, 0, 1, -8)
-    titleFix.BackgroundColor3 = titleBar.BackgroundColor3
-    titleFix.BorderSizePixel = 0
-    titleFix.Parent = titleBar
+    -- Minimize button
+    local minimizeButton = Instance.new("TextButton")
+    minimizeButton.Name = "MinimizeButton"
+    minimizeButton.Size = UDim2.new(0, 30, 0, 25)
+    minimizeButton.Position = UDim2.new(1, -80, 0.5, -12.5)
+    minimizeButton.BackgroundColor3 = Color3.fromRGB(255, 193, 7)
+    minimizeButton.BorderSizePixel = 0
+    minimizeButton.Text = "−"
+    minimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    minimizeButton.TextSize = 14
+    minimizeButton.Font = Enum.Font.GothamBold
+    minimizeButton.Parent = titleBar
     
-    -- Window title
-    local title = Instance.new("TextLabel")
-    title.Name = "Title"
-    title.Size = UDim2.new(1, -120, 1, 0)
-    title.Position = UDim2.new(0, 15, 0, 0)
-    title.BackgroundTransparency = 1
-    title.Text = "Global Executor Chat - " .. (userConfig.language or "English")
-    title.TextColor3 = ThemeManager:GetCurrentTheme().text
-    title.TextSize = 16
-    title.Font = Enum.Font.GothamBold
-    title.TextXAlignment = Enum.TextXAlignment.Left
-    title.Parent = titleBar
+    local minimizeCorner = Instance.new("UICorner")
+    minimizeCorner.CornerRadius = UDim.new(0, 4)
+    minimizeCorner.Parent = minimizeButton
+    
+    minimizeButton.MouseButton1Click:Connect(function()
+        -- Minimize the window (make it smaller)
+        local minimizedSize = UDim2.new(0, 300, 0, 40)
+        local originalSize = mainWindow.Size
+        local originalPosition = mainWindow.Position
+        
+        -- Store original size and position for restoration
+        mainWindow:SetAttribute("OriginalSizeX", originalSize.X.Offset)
+        mainWindow:SetAttribute("OriginalSizeY", originalSize.Y.Offset)
+        mainWindow:SetAttribute("OriginalPosX", originalPosition.X.Offset)
+        mainWindow:SetAttribute("OriginalPosY", originalPosition.Y.Offset)
+        
+        -- Hide chat elements
+        for _, child in pairs(mainWindow:GetChildren()) do
+            if child ~= titleBar then
+                child.Visible = false
+            end
+        end
+        
+        -- Minimize animation
+        TweenService:Create(mainWindow, TweenInfo.new(0.3), {
+            Size = minimizedSize,
+            Position = UDim2.new(1, -310, 1, -50)
+        }):Play()
+        
+        -- Change minimize button to restore button
+        minimizeButton.Text = "□"
+        
+        -- Change minimize button function to restore
+        local oldClick = minimizeButton.MouseButton1Click:Connect(function() end)
+        oldClick:Disconnect()
+        
+        minimizeButton.MouseButton1Click:Connect(function()
+            -- Restore window
+            for _, child in pairs(mainWindow:GetChildren()) do
+                child.Visible = true
+            end
+            
+            -- Restore animation
+            TweenService:Create(mainWindow, TweenInfo.new(0.3), {
+                Size = UDim2.new(0, mainWindow:GetAttribute("OriginalSizeX"), 0, mainWindow:GetAttribute("OriginalSizeY")),
+                Position = UDim2.new(0.5, -mainWindow:GetAttribute("OriginalSizeX")/2, 0.5, -mainWindow:GetAttribute("OriginalSizeY")/2)
+            }):Play()
+            
+            -- Change back to minimize button
+            minimizeButton.Text = "−"
+            
+            -- Reset click handler
+            local restoreClick = minimizeButton.MouseButton1Click:Connect(function() end)
+            restoreClick:Disconnect()
+            
+            minimizeButton.MouseButton1Click:Connect(function()
+                -- This will be replaced when the button is clicked
+                -- We're using this approach to avoid recursive function references
+            end)
+        end)
+    end)
     
     -- Close button
     local closeButton = Instance.new("TextButton")
