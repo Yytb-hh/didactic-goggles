@@ -5878,13 +5878,35 @@ function GlobalChat:ShowPlatformSelection()
     corner.CornerRadius = UDim.new(0, 12)
     corner.Parent = mainFrame
 
-    -- Make the frame draggable
+    -- Make window draggable
     local dragging = false
-    local dragStart = nil
-    local startPos = nil
+    local dragInput
+    local dragStart
+    local startPos
     
-    mainFrame.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+    local function updateDrag(input)
+        if not dragging then return end
+        
+        local delta = input.Position - dragStart
+        local newPosition = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        
+        -- Clamp position to screen bounds
+        local screenSize = GuiService:GetScreenResolution()
+        local windowSize = mainFrame.AbsoluteSize
+        
+        local minX = 0
+        local maxX = screenSize.X - windowSize.X
+        local minY = 0
+        local maxY = screenSize.Y - windowSize.Y
+        
+        local newX = math.clamp(newPosition.X.Offset, minX, maxX)
+        local newY = math.clamp(newPosition.Y.Offset, minY, maxY)
+        
+        mainFrame.Position = UDim2.new(newPosition.X.Scale, newX, newPosition.Y.Scale, newY)
+    end
+    
+    headerFrame.InputBegan:Connect(function(input)
+        if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
             dragging = true
             dragStart = input.Position
             startPos = mainFrame.Position
@@ -5897,10 +5919,15 @@ function GlobalChat:ShowPlatformSelection()
         end
     end)
     
+    headerFrame.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+    
     UserInputService.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            local delta = input.Position - dragStart
-            mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        if input == dragInput and dragging then
+            updateDrag(input)
         end
     end)
 
@@ -6326,9 +6353,10 @@ function GlobalChat:ShowCountrySelectionScreen()
         countryButton.MouseButton1Click:Connect(function()
             UserManager:SetUserCountry(country.code)
             
-            -- Exit animation
+            -- Exit animation using scale
             local exitTween = TweenService:Create(mainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
-                Position = UDim2.new(0.5, -300, -0.5, -250)
+                Size = UDim2.new(0, 0, 0, 0),
+                AnchorPoint = Vector2.new(0.5, 0.5)
             })
             exitTween:Play()
             exitTween.Completed:Connect(function()
@@ -6358,9 +6386,10 @@ function GlobalChat:ShowCountrySelectionScreen()
     -- Add entrance animation (scale instead of position)
     mainFrame.Size = UDim2.new(0, 0, 0, 0)
     mainFrame.BackgroundTransparency = 1
+    mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
     
     local entranceTween = TweenService:Create(mainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-        Size = UDim2.new(0, 500, 0, 400),
+        Size = UDim2.new(0.8, 0, 0.6, 0),
         BackgroundTransparency = 0
     })
     entranceTween:Play()
@@ -6376,7 +6405,7 @@ function GlobalChat:ShowLanguageSelectionScreen(countryCode)
     -- Main container
     local mainFrame = Instance.new("Frame")
     mainFrame.Name = "LanguageContainer"
-    mainFrame.Size = UDim2.new(0.9, 0, 0.6, 0)
+    mainFrame.Size = UDim2.new(0.8, 0, 0.6, 0) -- Reduced from 0.9 to 0.8 for better mobile sizing
     mainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
     mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
     mainFrame.BackgroundColor3 = ThemeManager:GetCurrentTheme().primary
@@ -6387,56 +6416,80 @@ function GlobalChat:ShowLanguageSelectionScreen(countryCode)
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(0, 12)
     corner.Parent = mainFrame
+    
+    -- Add draggable header
+    local headerFrame = Instance.new("Frame")
+    headerFrame.Name = "HeaderFrame"
+    headerFrame.Size = UDim2.new(1, 0, 0, 40)
+    headerFrame.Position = UDim2.new(0, 0, 0, 0)
+    headerFrame.BackgroundColor3 = ThemeManager:GetCurrentTheme().secondary
+    headerFrame.BorderSizePixel = 0
+    headerFrame.Parent = mainFrame
+    
+    local headerCorner = Instance.new("UICorner")
+    headerCorner.CornerRadius = UDim.new(0, 12)
+    headerCorner.Parent = headerFrame
+    
+    -- Fix header corners
+    local headerFix = Instance.new("Frame")
+    headerFix.Size = UDim2.new(1, 0, 0, 8)
+    headerFix.Position = UDim2.new(0, 0, 1, -8)
+    headerFix.BackgroundColor3 = headerFrame.BackgroundColor3
+    headerFix.BorderSizePixel = 0
+    headerFix.ZIndex = 0
+    headerFix.Parent = headerFrame
 
-    -- Close button
+    -- Add title
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Name = "TitleLabel"
+    titleLabel.Size = UDim2.new(1, -20, 1, 0)
+    titleLabel.Position = UDim2.new(0, 10, 0, 0)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Text = "Select Your Language"
+    titleLabel.TextColor3 = ThemeManager:GetCurrentTheme().text
+    titleLabel.TextSize = 18
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    titleLabel.Parent = headerFrame
+    
+    -- Add header close button
     local closeButton = Instance.new("TextButton")
     closeButton.Name = "CloseButton"
-    closeButton.Size = UDim2.new(0, 40, 0, 40)
-    closeButton.Position = UDim2.new(1, -50, 0, 10)
+    closeButton.Size = UDim2.new(0, 30, 0, 30)
+    closeButton.Position = UDim2.new(1, -35, 0, 5)
     closeButton.BackgroundColor3 = Color3.fromRGB(220, 53, 69)
     closeButton.BorderSizePixel = 0
     closeButton.Text = "✕"
     closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    closeButton.TextSize = 18
+    closeButton.TextSize = 16
     closeButton.Font = Enum.Font.GothamBold
-    closeButton.Parent = mainFrame
-
+    closeButton.ZIndex = 10
+    closeButton.Parent = headerFrame
+    
     local closeCorner = Instance.new("UICorner")
-    closeCorner.CornerRadius = UDim.new(0, 20)
+    closeCorner.CornerRadius = UDim.new(0, 15)
     closeCorner.Parent = closeButton
-
+    
     closeButton.MouseButton1Click:Connect(function()
         screenGui:Destroy()
     end)
 
-    -- Title
-    local title = Instance.new("TextLabel")
-    title.Name = "Title"
-    title.Size = UDim2.new(1, -100, 0, 60)
-    title.Position = UDim2.new(0, 0, 0, 0)
-    title.BackgroundTransparency = 1
-    title.Text = "Select Your Language"
-    title.TextColor3 = ThemeManager:GetCurrentTheme().text
-    title.TextSize = 24
-    title.Font = Enum.Font.GothamBold
-    title.TextXAlignment = Enum.TextXAlignment.Center
-    title.Parent = mainFrame
-
     -- Back button
     local backButton = Instance.new("TextButton")
     backButton.Name = "BackButton"
-    backButton.Size = UDim2.new(0, 40, 0, 40)
-    backButton.Position = UDim2.new(0, 10, 0, 10)
-    backButton.BackgroundColor3 = ThemeManager:GetCurrentTheme().secondary
+    backButton.Size = UDim2.new(0, 30, 0, 30)
+    backButton.Position = UDim2.new(0, 5, 0, 5)
+    backButton.BackgroundColor3 = ThemeManager:GetCurrentTheme().accent
     backButton.BorderSizePixel = 0
     backButton.Text = "←"
     backButton.TextColor3 = ThemeManager:GetCurrentTheme().text
-    backButton.TextSize = 20
+    backButton.TextSize = 18
     backButton.Font = Enum.Font.GothamBold
-    backButton.Parent = mainFrame
+    backButton.ZIndex = 10
+    backButton.Parent = headerFrame
 
     local backCorner = Instance.new("UICorner")
-    backCorner.CornerRadius = UDim.new(0, 8)
+    backCorner.CornerRadius = UDim.new(0, 15)
     backCorner.Parent = backButton
 
     -- Back button click handler
@@ -6444,6 +6497,16 @@ function GlobalChat:ShowLanguageSelectionScreen(countryCode)
         screenGui:Destroy()
         self:ShowCountrySelectionScreen()
     end)
+    
+    -- Create content container
+    local contentContainer = Instance.new("Frame")
+    contentContainer.Name = "ContentContainer"
+    contentContainer.Size = UDim2.new(1, 0, 1, -50) -- Leave space for header
+    contentContainer.Position = UDim2.new(0, 0, 0, 50)
+    contentContainer.BackgroundColor3 = ThemeManager:GetCurrentTheme().primary
+    contentContainer.BackgroundTransparency = 0.1
+    contentContainer.BorderSizePixel = 0
+    contentContainer.Parent = mainFrame
 
     -- Get languages for selected country
     local selectedCountry = Config:GetCountryByCode(countryCode)
@@ -6452,10 +6515,10 @@ function GlobalChat:ShowLanguageSelectionScreen(countryCode)
     -- Languages container
     local languagesFrame = Instance.new("Frame")
     languagesFrame.Name = "LanguagesFrame"
-    languagesFrame.Size = UDim2.new(1, -40, 1, -120)
-    languagesFrame.Position = UDim2.new(0, 20, 0, 80)
+    languagesFrame.Size = UDim2.new(1, -40, 1, -20)
+    languagesFrame.Position = UDim2.new(0, 20, 0, 10)
     languagesFrame.BackgroundTransparency = 1
-    languagesFrame.Parent = mainFrame
+    languagesFrame.Parent = contentContainer
 
     local layout = Instance.new("UIListLayout")
     layout.SortOrder = Enum.SortOrder.LayoutOrder
@@ -6497,9 +6560,10 @@ function GlobalChat:ShowLanguageSelectionScreen(countryCode)
         langButton.MouseButton1Click:Connect(function()
             UserManager:SetUserLanguage(language)
             
-            -- Exit animation
+            -- Exit animation using scale
             local exitTween = TweenService:Create(mainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
-                Position = UDim2.new(0.5, -250, -0.5, -200)
+                Size = UDim2.new(0, 0, 0, 0),
+                AnchorPoint = Vector2.new(0.5, 0.5)
             })
             exitTween:Play()
             exitTween.Completed:Connect(function()
@@ -6509,10 +6573,11 @@ function GlobalChat:ShowLanguageSelectionScreen(countryCode)
         end)
     end
 
-    -- Add entrance animation
-    mainFrame.Position = UDim2.new(0.5, -250, 1.5, -200)
+    -- Add entrance animation using scale
+    mainFrame.Size = UDim2.new(0, 0, 0, 0)
+    mainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
     local entranceTween = TweenService:Create(mainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-        Position = UDim2.new(0.5, -250, 0.5, -200)
+        Size = UDim2.new(0.8, 0, 0.6, 0)
     })
     entranceTween:Play()
 end
