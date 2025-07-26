@@ -689,11 +689,33 @@ end
 
 -- Platform Detection
 function Utils:IsMobile()
-    return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+    -- More robust mobile detection
+    local screenSize = GuiService:GetScreenResolution()
+    local hasTouch = UserInputService.TouchEnabled
+    local hasKeyboard = UserInputService.KeyboardEnabled
+    local hasMouse = UserInputService.MouseEnabled
+    
+    -- Primary mobile indicators
+    if hasTouch and not hasKeyboard and not hasMouse then
+        return true
+    end
+    
+    -- Secondary check: small screen with touch (tablets, small laptops with touch)
+    if hasTouch and (screenSize.X < 1024 or screenSize.Y < 768) then
+        return true
+    end
+    
+    -- Check for mobile-specific GUI insets (notches, etc.)
+    local guiInset = GuiService:GetGuiInset()
+    if guiInset.Y > 40 then -- Likely has a notch or status bar
+        return true
+    end
+    
+    return false
 end
 
 function Utils:IsPC()
-    return UserInputService.KeyboardEnabled and UserInputService.MouseEnabled
+    return not self:IsMobile()
 end
 
 function Utils:GetPlatform()
@@ -702,6 +724,52 @@ function Utils:GetPlatform()
     else
         return "PC"
     end
+end
+
+function Utils:GetSafeAreaInsets()
+    -- Get safe area insets for mobile devices (notches, home indicators, etc.)
+    local guiInset = GuiService:GetGuiInset()
+    local screenSize = GuiService:GetScreenResolution()
+    
+    return {
+        top = math.max(guiInset.Y, 20),
+        bottom = math.max(20, screenSize.Y * 0.05), -- Account for home indicator
+        left = math.max(guiInset.X, 10),
+        right = math.max(10, screenSize.X * 0.02)
+    }
+end
+
+function Utils:GetOptimalWindowSize(platform)
+    local screenSize = GuiService:GetScreenResolution()
+    
+    if platform == "Mobile" then
+        local safeArea = self:GetSafeAreaInsets()
+        return {
+            width = math.min(screenSize.X - safeArea.left - safeArea.right - 40, 400),
+            height = math.min(screenSize.Y - safeArea.top - safeArea.bottom - 60, 500)
+        }
+    else
+        return {
+            width = math.min(screenSize.X * 0.8, 1000),
+            height = math.min(screenSize.Y * 0.8, 700)
+        }
+    end
+end
+
+function Utils:GetTextSize(text, font, textSize, maxWidth)
+    -- Calculate text bounds for proper sizing
+    local textBounds = TextService:GetTextSize(text, textSize, font, Vector2.new(maxWidth or math.huge, math.huge))
+    return textBounds
+end
+
+function Utils:FormatTimestamp(timestamp)
+    -- Format timestamp for display
+    return os.date("%H:%M", timestamp)
+end
+
+function Utils:Trim(str)
+    -- Remove leading and trailing whitespace
+    return str:match("^%s*(.-)%s*$")
 end
 
 -- Storage Utilities (using persistent storage)
@@ -948,6 +1016,12 @@ function ThemeManager:SetTheme(themeName)
     
     currentTheme = Utils:DeepCopy(theme)
     
+    -- Save theme preference
+    Utils:SaveData("theme", themeName)
+    
+    -- Update all existing UI elements
+    self:UpdateAllUIElements()
+    
     -- Notify all registered callbacks
     for _, callback in ipairs(themeCallbacks) do
         callback(currentTheme)
@@ -955,6 +1029,56 @@ function ThemeManager:SetTheme(themeName)
     
     print("🎨 Theme changed to: " .. themeName)
     return true
+end
+
+function ThemeManager:UpdateAllUIElements()
+    -- Update all UI elements with new theme
+    local playerGui = Players.LocalPlayer:FindFirstChild("PlayerGui")
+    if not playerGui then return end
+    
+    local chatInterface = playerGui:FindFirstChild("GlobalChatInterface")
+    if not chatInterface then return end
+    
+    -- Recursively update all UI elements
+    local function updateElement(element)
+        if element:IsA("Frame") then
+            if element.Name == "MainWindow" or element.Name == "ChatWindow" then
+                element.BackgroundColor3 = self:GetCurrentTheme().primary
+            elseif element.Name == "TitleBar" or element.Name == "DragHeader" then
+                element.BackgroundColor3 = self:GetCurrentTheme().secondary
+            elseif element.Name == "ChatArea" then
+                element.BackgroundColor3 = self:GetCurrentTheme().secondary
+                element.ScrollBarImageColor3 = self:GetCurrentTheme().accent
+            elseif element.Name == "InputFrame" then
+                element.BackgroundColor3 = self:GetCurrentTheme().primary
+            end
+        elseif element:IsA("TextLabel") then
+            if element.Name == "Title" or element.Name == "Header" then
+                element.TextColor3 = self:GetCurrentTheme().text
+            elseif element.Name == "Content" then
+                element.TextColor3 = self:GetCurrentTheme().text
+            end
+        elseif element:IsA("TextBox") then
+            if element.Name == "InputBox" then
+                element.BackgroundColor3 = self:GetCurrentTheme().secondary
+                element.TextColor3 = self:GetCurrentTheme().text
+                element.PlaceholderColor3 = self:GetCurrentTheme().textMuted
+            end
+        elseif element:IsA("TextButton") then
+            if element.Name == "SendButton" or element.Name == "SettingsButton" then
+                element.BackgroundColor3 = self:GetCurrentTheme().accent
+            elseif element.Name == "FloatingButton" then
+                element.BackgroundColor3 = self:GetCurrentTheme().accent
+            end
+        end
+        
+        -- Recursively update children
+        for _, child in pairs(element:GetChildren()) do
+            updateElement(child)
+        end
+    end
+    
+    updateElement(chatInterface)
 end
 
 function ThemeManager:GetCurrentTheme()
@@ -1148,6 +1272,13 @@ function ThemeManager:ApplyCustomStyle(guiObject, style)
             end
         end
     end
+end
+
+function ThemeManager:Cleanup()
+    -- Clear all theme callbacks
+    themeCallbacks = {}
+    currentTheme = nil
+    print("🎨 ThemeManager cleaned up")
 end
 
 -- ============================================================================
@@ -4971,26 +5102,7 @@ end
 
 -- Detect platform
 function GlobalChat:DetectPlatform()
-    -- First check for explicit mobile devices
-    if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
-        return "Mobile"
-    elseif UserInputService.KeyboardEnabled and UserInputService.MouseEnabled then
-        -- Check screen size even for PC devices - small windows should use mobile UI
-        local screenSize = GuiService:GetScreenResolution()
-        if screenSize.X < 1024 or screenSize.Y < 768 then
-            return "Mobile"  -- Small screen PC should use mobile UI
-        else
-            return "PC"
-        end
-    else
-        -- Fallback detection based on screen size
-        local screenSize = GuiService:GetScreenResolution()
-        if screenSize.X < 1024 or screenSize.Y < 768 then
-            return "Mobile"
-        else
-            return "PC"
-        end
-    end
+    return Utils:GetPlatform()
 end
 
 -- Create setup wizard
@@ -5077,6 +5189,8 @@ end
 
 -- Create simple chat interface
 function GlobalChat:CreateSimpleChatInterface(userConfig)
+    print("🔧 Creating chat interface for platform:", userConfig.platform or self:DetectPlatform())
+    
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "GlobalChatInterface"
     screenGui.ResetOnSpawn = false
@@ -5085,42 +5199,66 @@ function GlobalChat:CreateSimpleChatInterface(userConfig)
     local platform = userConfig.platform or self:DetectPlatform()
     
     if platform == "Mobile" then
+        print("📱 Creating mobile interface...")
         self:CreateMobileInterface(screenGui, userConfig)
     else
+        print("💻 Creating desktop interface...")
         self:CreateDesktopInterface(screenGui, userConfig)
     end
     
+    print("✅ Chat interface created successfully!")
     return screenGui
 end
 
 -- Create mobile interface
 function GlobalChat:CreateMobileInterface(parent, userConfig)
-    -- Floating button
+    local safeArea = Utils:GetSafeAreaInsets()
+    local optimalSize = Utils:GetOptimalWindowSize("Mobile")
+    local screenSize = GuiService:GetScreenResolution()
+    
+    -- Floating button with safe area positioning
     local floatingButton = Instance.new("TextButton")
     floatingButton.Name = "FloatingButton"
-    floatingButton.Size = Config.MOBILE.FLOATING_BUTTON_SIZE
-    floatingButton.Position = Config.MOBILE.FLOATING_BUTTON_POSITION
+    floatingButton.Size = UDim2.new(0, 60, 0, 60) -- Larger for better touch target
+    floatingButton.Position = UDim2.new(1, -safeArea.right - 70, 1, -safeArea.bottom - 70)
     floatingButton.BackgroundColor3 = ThemeManager:GetCurrentTheme().accent
     floatingButton.BorderSizePixel = 0
     floatingButton.Text = "💬"
     floatingButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    floatingButton.TextSize = 20
+    floatingButton.TextSize = 24
     floatingButton.Font = Enum.Font.GothamBold
+    floatingButton.ZIndex = 100
     floatingButton.Parent = parent
     
-    -- Make it circular
+    -- Add shadow effect
+    local shadow = Instance.new("Frame")
+    shadow.Name = "Shadow"
+    shadow.Size = UDim2.new(1, 4, 1, 4)
+    shadow.Position = UDim2.new(0, -2, 0, -2)
+    shadow.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    shadow.BackgroundTransparency = 0.7
+    shadow.BorderSizePixel = 0
+    shadow.ZIndex = floatingButton.ZIndex - 1
+    shadow.Parent = floatingButton
+    
+    local shadowCorner = Instance.new("UICorner")
+    shadowCorner.CornerRadius = UDim.new(0.5, 0)
+    shadowCorner.Parent = shadow
+    
+    -- Make button circular
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(0.5, 0)
     corner.Parent = floatingButton
     
-    -- Chat window (initially hidden)
+    -- Chat window with responsive sizing
     local chatWindow = Instance.new("Frame")
     chatWindow.Name = "ChatWindow"
-    chatWindow.Size = Config.MOBILE.CHAT_WINDOW_SIZE
-    chatWindow.Position = UDim2.new(0.5, -200, 0.5, -150)
+    chatWindow.Size = UDim2.new(0, optimalSize.width, 0, optimalSize.height)
+    chatWindow.Position = UDim2.new(0.5, -optimalSize.width/2, 0.5, -optimalSize.height/2)
     chatWindow.BackgroundColor3 = ThemeManager:GetCurrentTheme().primary
     chatWindow.BorderSizePixel = 0
     chatWindow.Visible = false
+    chatWindow.ZIndex = 50
     chatWindow.Parent = parent
     
     local windowCorner = Instance.new("UICorner")
@@ -5161,11 +5299,12 @@ function GlobalChat:CreateMobileInterface(parent, userConfig)
     headerTitle.TextXAlignment = Enum.TextXAlignment.Left
     headerTitle.Parent = dragHeader
     
-    -- Make window properly draggable using the header
+    -- Enhanced dragging with proper touch support and constraints
     local dragging = false
     local dragInput
     local dragStart
     local startPos
+    local dragConnection
     
     local function updateDrag(input)
         if not dragging then return end
@@ -5173,44 +5312,56 @@ function GlobalChat:CreateMobileInterface(parent, userConfig)
         local delta = input.Position - dragStart
         local newPosition = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
         
-        -- Clamp position to screen bounds
+        -- Enhanced screen bounds with safe area
         local screenSize = GuiService:GetScreenResolution()
         local windowSize = chatWindow.AbsoluteSize
+        local safeArea = Utils:GetSafeAreaInsets()
         
-        local minX = 0
-        local maxX = screenSize.X - windowSize.X
-        local minY = 0
-        local maxY = screenSize.Y - windowSize.Y
+        local minX = safeArea.left
+        local maxX = screenSize.X - windowSize.X - safeArea.right
+        local minY = safeArea.top
+        local maxY = screenSize.Y - windowSize.Y - safeArea.bottom
         
         local newX = math.clamp(newPosition.X.Offset, minX, maxX)
         local newY = math.clamp(newPosition.Y.Offset, minY, maxY)
         
-        chatWindow.Position = UDim2.new(newPosition.X.Scale, newX, newPosition.Y.Scale, newY)
+        chatWindow.Position = UDim2.new(0, newX, 0, newY)
     end
     
-    dragHeader.InputBegan:Connect(function(input)
-        if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
-            dragging = true
-            dragStart = input.Position
-            startPos = chatWindow.Position
-            
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
+    local function startDrag(input)
+        if dragging then return end
+        
+        dragging = true
+        dragStart = input.Position
+        startPos = chatWindow.Position
+        
+        -- Create connection for drag updates
+        dragConnection = UserInputService.InputChanged:Connect(function(moveInput)
+            if moveInput.UserInputType == Enum.UserInputType.MouseMovement or 
+               moveInput.UserInputType == Enum.UserInputType.Touch then
+                updateDrag(moveInput)
+            end
+        end)
+        
+        -- Handle drag end
+        local endConnection
+        endConnection = UserInputService.InputEnded:Connect(function(endInput)
+            if endInput.UserInputType == input.UserInputType then
+                dragging = false
+                if dragConnection then
+                    dragConnection:Disconnect()
+                    dragConnection = nil
                 end
-            end)
-        end
-    end)
+                endConnection:Disconnect()
+            end
+        end)
+    end
     
-    dragHeader.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-            dragInput = input
-        end
-    end)
-    
-    UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and dragging then
-            updateDrag(input)
+    -- Touch and mouse support for dragging
+    dragHeader.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or 
+           input.UserInputType == Enum.UserInputType.Touch then
+            startDrag(input)
         end
     end)
 
@@ -5222,46 +5373,96 @@ function GlobalChat:CreateMobileInterface(parent, userConfig)
     contentContainer.Size = UDim2.new(1, 0, 1, -50) -- Leave space for header
     contentContainer.Position = UDim2.new(0, 0, 0, 50)
     contentContainer.BackgroundColor3 = ThemeManager:GetCurrentTheme().primary
-    contentContainer.BackgroundTransparency = 0.1
+    contentContainer.BackgroundTransparency = 0
     contentContainer.BorderSizePixel = 0
     contentContainer.Parent = chatWindow
     
-    -- Toggle functionality
+    -- Enhanced toggle functionality with keyboard handling
     local isOpen = false
-    local initialPosition = UDim2.new(0.5, -200, 0.5, -150)
-    
-    -- Store the position when window is closed so we can reopen in same position
+    local initialPosition = UDim2.new(0.5, -optimalSize.width/2, 0.5, -optimalSize.height/2)
     local lastPosition = initialPosition
+    local keyboardConnection
+    local originalPosition
     
+    -- Keyboard handling for mobile
+    local function handleKeyboard()
+        if not Utils:IsMobile() then return end
+        
+        local function onKeyboardChanged()
+            if not isOpen then return end
+            
+            local screenSize = GuiService:GetScreenResolution()
+            local keyboardHeight = GuiService:GetGuiInset().Y
+            
+            if keyboardHeight > 100 then -- Keyboard is open
+                -- Move window up to avoid keyboard
+                originalPosition = chatWindow.Position
+                local newY = math.max(safeArea.top, screenSize.Y - keyboardHeight - optimalSize.height - 20)
+                chatWindow.Position = UDim2.new(chatWindow.Position.X.Scale, chatWindow.Position.X.Offset, 0, newY)
+            else -- Keyboard is closed
+                -- Restore original position
+                if originalPosition then
+                    chatWindow.Position = originalPosition
+                    originalPosition = nil
+                end
+            end
+        end
+        
+        keyboardConnection = GuiService:GetPropertyChangedSignal("ScreenOrientation"):Connect(onKeyboardChanged)
+        UserInputService:GetPropertyChangedSignal("OnScreenKeyboardVisible"):Connect(onKeyboardChanged)
+    end
+    
+    -- Enhanced button click with haptic feedback
     floatingButton.MouseButton1Click:Connect(function()
+        -- Haptic feedback for mobile
+        if Utils:IsMobile() then
+            pcall(function()
+                UserInputService:GamepadVibrate(Enum.UserInputType.Gamepad1, 0.1, 0.1, 0.1)
+            end)
+        end
+        
         isOpen = not isOpen
         
         if isOpen then
-            -- Use the last position if available, otherwise center
+            -- Position window properly
             if lastPosition then
                 chatWindow.Position = lastPosition
             else
                 chatWindow.Position = initialPosition
             end
             
-            -- Position is already set correctly, no need for anchor point
             chatWindow.Visible = true
             
-            -- Animate the window opening
+            -- Enhanced opening animation
             chatWindow.Size = UDim2.new(0, 0, 0, 0)
             chatWindow.BackgroundTransparency = 1
+            chatWindow.AnchorPoint = Vector2.new(0.5, 0.5)
+            chatWindow.Position = UDim2.new(0.5, 0, 0.5, 0)
             
-            -- Animation sequence
-            TweenService:Create(chatWindow, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-                Size = Config.MOBILE.CHAT_WINDOW_SIZE,
+            local openTween = TweenService:Create(chatWindow, 
+                TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+                Size = UDim2.new(0, optimalSize.width, 0, optimalSize.height),
                 BackgroundTransparency = 0
-            }):Play()
+            })
+            
+            openTween:Play()
+            openTween.Completed:Connect(function()
+                chatWindow.AnchorPoint = Vector2.new(0, 0)
+                handleKeyboard()
+            end)
         else
             -- Store current position before closing
             lastPosition = chatWindow.Position
             
-            -- Animate closing
-            local closeTween = TweenService:Create(chatWindow, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+            -- Disconnect keyboard handling
+            if keyboardConnection then
+                keyboardConnection:Disconnect()
+                keyboardConnection = nil
+            end
+            
+            -- Enhanced closing animation
+            local closeTween = TweenService:Create(chatWindow, 
+                TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
                 Size = UDim2.new(0, 0, 0, 0),
                 BackgroundTransparency = 1
             })
@@ -5274,95 +5475,102 @@ function GlobalChat:CreateMobileInterface(parent, userConfig)
         end
     end)
     
-    -- Add minimize button to mobile interface
-    local mobileMinimizeButton = Instance.new("TextButton")
-    mobileMinimizeButton.Name = "MinimizeButton"
-    mobileMinimizeButton.Size = UDim2.new(0, 30, 0, 30)
-    mobileMinimizeButton.Position = UDim2.new(1, -80, 0.5, -15)
-    mobileMinimizeButton.BackgroundColor3 = Color3.fromRGB(255, 193, 7)
-    mobileMinimizeButton.BorderSizePixel = 0
-    mobileMinimizeButton.Text = "−"
-    mobileMinimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    mobileMinimizeButton.TextSize = 16
-    mobileMinimizeButton.Font = Enum.Font.GothamBold
-    mobileMinimizeButton.Parent = dragHeader
-    mobileMinimizeButton.ZIndex = 10
-
-    local mobileMinimizeCorner = Instance.new("UICorner")
-    mobileMinimizeCorner.CornerRadius = UDim.new(0.5, 0)
-    mobileMinimizeCorner.Parent = mobileMinimizeButton
-
-    mobileMinimizeButton.MouseButton1Click:Connect(function()
-        isOpen = false
-        
-        -- Animate closing
-        local closeTween = TweenService:Create(chatWindow, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-            Size = UDim2.new(0, 0, 0, 0),
-            BackgroundTransparency = 1
-        })
-        
-        closeTween.Completed:Connect(function()
-            chatWindow.Visible = false
-        end)
-        
-        closeTween:Play()
-    end)
-
-    -- Add close button to mobile interface
-    local mobileCloseButton = Instance.new("TextButton")
-    mobileCloseButton.Name = "CloseButton"
-    mobileCloseButton.Size = UDim2.new(0, 30, 0, 30)
-    mobileCloseButton.Position = UDim2.new(1, -40, 0.5, -15)
-    mobileCloseButton.BackgroundColor3 = Color3.fromRGB(220, 53, 69)
-    mobileCloseButton.BorderSizePixel = 0
-    mobileCloseButton.Text = "✕"
-    mobileCloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    mobileCloseButton.TextSize = 16
-    mobileCloseButton.Font = Enum.Font.GothamBold
-    mobileCloseButton.Parent = dragHeader
-    mobileCloseButton.ZIndex = 10
-
-    local mobileCloseCorner = Instance.new("UICorner")
-    mobileCloseCorner.CornerRadius = UDim.new(0.5, 0)
-    mobileCloseCorner.Parent = mobileCloseButton
-
-    mobileCloseButton.MouseButton1Click:Connect(function()
-        isOpen = false
-        
-        -- Animate closing
-        local closeTween = TweenService:Create(chatWindow, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-            Size = UDim2.new(0, 0, 0, 0),
-            BackgroundTransparency = 1
-        })
-        
-        closeTween.Completed:Connect(function()
-            chatWindow.Visible = false
-        end)
-        
-        closeTween:Play()
-    end)
-
-    -- Add settings button to mobile interface
+    -- Mobile header buttons with better touch targets
+    local buttonSize = 36 -- Larger for better touch
+    local buttonSpacing = 8
+    
+    -- Settings button
     local mobileSettingsButton = Instance.new("TextButton")
     mobileSettingsButton.Name = "SettingsButton"
-    mobileSettingsButton.Size = UDim2.new(0, 30, 0, 30)
-    mobileSettingsButton.Position = UDim2.new(1, -120, 0.5, -15)
+    mobileSettingsButton.Size = UDim2.new(0, buttonSize, 0, buttonSize)
+    mobileSettingsButton.Position = UDim2.new(1, -(buttonSize * 3 + buttonSpacing * 2 + 10), 0.5, -buttonSize/2)
     mobileSettingsButton.BackgroundColor3 = ThemeManager:GetCurrentTheme().accent
     mobileSettingsButton.BorderSizePixel = 0
     mobileSettingsButton.Text = "⚙️"
     mobileSettingsButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    mobileSettingsButton.TextSize = 16
+    mobileSettingsButton.TextSize = 18
     mobileSettingsButton.Font = Enum.Font.GothamBold
     mobileSettingsButton.Parent = dragHeader
-    mobileSettingsButton.ZIndex = 10
+    mobileSettingsButton.ZIndex = 60
     
     local mobileSettingsCorner = Instance.new("UICorner")
-    mobileSettingsCorner.CornerRadius = UDim.new(0.5, 0)
+    mobileSettingsCorner.CornerRadius = UDim.new(0, 6)
     mobileSettingsCorner.Parent = mobileSettingsButton
     
-    -- Connect settings button
+    -- Minimize button
+    local mobileMinimizeButton = Instance.new("TextButton")
+    mobileMinimizeButton.Name = "MinimizeButton"
+    mobileMinimizeButton.Size = UDim2.new(0, buttonSize, 0, buttonSize)
+    mobileMinimizeButton.Position = UDim2.new(1, -(buttonSize * 2 + buttonSpacing + 10), 0.5, -buttonSize/2)
+    mobileMinimizeButton.BackgroundColor3 = Color3.fromRGB(255, 193, 7)
+    mobileMinimizeButton.BorderSizePixel = 0
+    mobileMinimizeButton.Text = "−"
+    mobileMinimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    mobileMinimizeButton.TextSize = 18
+    mobileMinimizeButton.Font = Enum.Font.GothamBold
+    mobileMinimizeButton.Parent = dragHeader
+    mobileMinimizeButton.ZIndex = 60
+
+    local mobileMinimizeCorner = Instance.new("UICorner")
+    mobileMinimizeCorner.CornerRadius = UDim.new(0, 6)
+    mobileMinimizeCorner.Parent = mobileMinimizeButton
+
+    -- Close button
+    local mobileCloseButton = Instance.new("TextButton")
+    mobileCloseButton.Name = "CloseButton"
+    mobileCloseButton.Size = UDim2.new(0, buttonSize, 0, buttonSize)
+    mobileCloseButton.Position = UDim2.new(1, -(buttonSize + 10), 0.5, -buttonSize/2)
+    mobileCloseButton.BackgroundColor3 = Color3.fromRGB(220, 53, 69)
+    mobileCloseButton.BorderSizePixel = 0
+    mobileCloseButton.Text = "✕"
+    mobileCloseButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    mobileCloseButton.TextSize = 18
+    mobileCloseButton.Font = Enum.Font.GothamBold
+    mobileCloseButton.Parent = dragHeader
+    mobileCloseButton.ZIndex = 60
+
+    local mobileCloseCorner = Instance.new("UICorner")
+    mobileCloseCorner.CornerRadius = UDim.new(0, 6)
+    mobileCloseCorner.Parent = mobileCloseButton
+
+    -- Enhanced button functionality with proper cleanup
+    local function closeWindow()
+        isOpen = false
+        lastPosition = chatWindow.Position
+        
+        -- Disconnect keyboard handling
+        if keyboardConnection then
+            keyboardConnection:Disconnect()
+            keyboardConnection = nil
+        end
+        
+        -- Enhanced closing animation
+        local closeTween = TweenService:Create(chatWindow, 
+            TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+            Size = UDim2.new(0, 0, 0, 0),
+            BackgroundTransparency = 1
+        })
+        
+        closeTween.Completed:Connect(function()
+            chatWindow.Visible = false
+        end)
+        
+        closeTween:Play()
+    end
+    
+    mobileMinimizeButton.MouseButton1Click:Connect(closeWindow)
+    mobileCloseButton.MouseButton1Click:Connect(closeWindow)
+    
+    -- Settings button with proper error handling
     mobileSettingsButton.MouseButton1Click:Connect(function()
-        showSettingsMenu()
+        pcall(function()
+            if createSettingsMenu then
+                createSettingsMenu()
+            else
+                -- Fallback settings menu
+                self:ShowNotification("Settings", "Settings menu coming soon!", "info")
+            end
+        end)
     end)
 
     -- Add basic chat elements
@@ -5371,14 +5579,38 @@ end
 
 -- Create desktop interface
 function GlobalChat:CreateDesktopInterface(parent, userConfig)
-    -- Main window
+    print("💻 Setting up desktop interface...")
+    local optimalSize = Utils:GetOptimalWindowSize("PC")
+    local screenSize = GuiService:GetScreenResolution()
+    
+    print("📏 Window size:", optimalSize.width, "x", optimalSize.height)
+    
+    -- Main window with responsive sizing
     local mainWindow = Instance.new("Frame")
     mainWindow.Name = "MainWindow"
-    mainWindow.Size = UDim2.new(0, Config.DESKTOP.WINDOW_DEFAULT_SIZE.X, 0, Config.DESKTOP.WINDOW_DEFAULT_SIZE.Y)
-    mainWindow.Position = UDim2.new(0.5, -Config.DESKTOP.WINDOW_DEFAULT_SIZE.X/2, 0.5, -Config.DESKTOP.WINDOW_DEFAULT_SIZE.Y/2)
+    mainWindow.Size = UDim2.new(0, optimalSize.width, 0, optimalSize.height)
+    mainWindow.Position = UDim2.new(0.5, -optimalSize.width/2, 0.5, -optimalSize.height/2)
     mainWindow.BackgroundColor3 = ThemeManager:GetCurrentTheme().primary
     mainWindow.BorderSizePixel = 0
+    mainWindow.ZIndex = 10
     mainWindow.Parent = parent
+    
+    print("🪟 Main window created")
+    
+    -- Add drop shadow
+    local shadow = Instance.new("Frame")
+    shadow.Name = "Shadow"
+    shadow.Size = UDim2.new(1, 8, 1, 8)
+    shadow.Position = UDim2.new(0, -4, 0, -4)
+    shadow.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    shadow.BackgroundTransparency = 0.8
+    shadow.BorderSizePixel = 0
+    shadow.ZIndex = mainWindow.ZIndex - 1
+    shadow.Parent = parent
+    
+    local shadowCorner = Instance.new("UICorner")
+    shadowCorner.CornerRadius = UDim.new(0, 12)
+    shadowCorner.Parent = shadow
     
     local windowCorner = Instance.new("UICorner")
     windowCorner.CornerRadius = UDim.new(0, 8)
@@ -5397,9 +5629,9 @@ function GlobalChat:CreateDesktopInterface(parent, userConfig)
     titleCorner.CornerRadius = UDim.new(0, 8)
     titleCorner.Parent = titleBar
     
-    -- Make window properly draggable using the title bar
+    -- Enhanced dragging with proper bounds checking and smooth movement
     local dragging = false
-    local dragInput
+    local dragConnection
     local dragStart
     local startPos
     
@@ -5409,44 +5641,62 @@ function GlobalChat:CreateDesktopInterface(parent, userConfig)
         local delta = input.Position - dragStart
         local newPosition = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
         
-        -- Clamp position to screen bounds
+        -- Enhanced screen bounds checking
         local screenSize = GuiService:GetScreenResolution()
         local windowSize = mainWindow.AbsoluteSize
+        local shadowOffset = 4
         
-        local minX = 0
-        local maxX = screenSize.X - windowSize.X
-        local minY = 0
-        local maxY = screenSize.Y - windowSize.Y
+        local minX = shadowOffset
+        local maxX = screenSize.X - windowSize.X - shadowOffset
+        local minY = shadowOffset
+        local maxY = screenSize.Y - windowSize.Y - shadowOffset
         
         local newX = math.clamp(newPosition.X.Offset, minX, maxX)
         local newY = math.clamp(newPosition.Y.Offset, minY, maxY)
         
-        mainWindow.Position = UDim2.new(newPosition.X.Scale, newX, newPosition.Y.Scale, newY)
+        -- Update both window and shadow positions
+        mainWindow.Position = UDim2.new(0, newX, 0, newY)
+        shadow.Position = UDim2.new(0, newX - shadowOffset, 0, newY - shadowOffset)
+    end
+    
+    local function startDrag(input)
+        if dragging then return end
+        
+        dragging = true
+        dragStart = input.Position
+        startPos = mainWindow.Position
+        
+        -- Visual feedback - slightly darken title bar
+        titleBar.BackgroundTransparency = 0.1
+        
+        -- Create drag connection
+        dragConnection = UserInputService.InputChanged:Connect(function(moveInput)
+            if moveInput.UserInputType == Enum.UserInputType.MouseMovement or 
+               moveInput.UserInputType == Enum.UserInputType.Touch then
+                updateDrag(moveInput)
+            end
+        end)
+        
+        -- Handle drag end
+        local endConnection
+        endConnection = UserInputService.InputEnded:Connect(function(endInput)
+            if endInput.UserInputType == input.UserInputType then
+                dragging = false
+                titleBar.BackgroundTransparency = 0
+                
+                if dragConnection then
+                    dragConnection:Disconnect()
+                    dragConnection = nil
+                end
+                endConnection:Disconnect()
+            end
+        end)
     end
     
     titleBar.InputBegan:Connect(function(input)
-        if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
-            dragging = true
-            dragStart = input.Position
-            startPos = mainWindow.Position
-            
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
-            end)
-        end
-    end)
-    
-    titleBar.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-            dragInput = input
-        end
-    end)
-    
-    UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and dragging then
-            updateDrag(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or 
+           input.UserInputType == Enum.UserInputType.Touch then
+            startDrag(input)
         end
     end)
     
@@ -5488,9 +5738,16 @@ function GlobalChat:CreateDesktopInterface(parent, userConfig)
     settingsCorner.CornerRadius = UDim.new(0, 6)
     settingsCorner.Parent = settingsButton
     
-    -- Connect settings button
+    -- Connect settings button with proper error handling
     settingsButton.MouseButton1Click:Connect(function()
-        showSettingsMenu()
+        pcall(function()
+            if createSettingsMenu then
+                createSettingsMenu()
+            else
+                -- Fallback settings menu
+                self:ShowNotification("Settings", "Settings menu coming soon!", "info")
+            end
+        end)
     end)
     
     -- Minimize button
@@ -5510,63 +5767,74 @@ function GlobalChat:CreateDesktopInterface(parent, userConfig)
     minimizeCorner.CornerRadius = UDim.new(0, 4)
     minimizeCorner.Parent = minimizeButton
     
-    minimizeButton.MouseButton1Click:Connect(function()
-        -- Minimize the window (make it smaller)
-        local minimizedSize = UDim2.new(0, 300, 0, 40)
-        local originalSize = mainWindow.Size
-        local originalPosition = mainWindow.Position
-        
-        -- Store original size and position for restoration
-        mainWindow:SetAttribute("OriginalSizeX", originalSize.X.Offset)
-        mainWindow:SetAttribute("OriginalSizeY", originalSize.Y.Offset)
-        mainWindow:SetAttribute("OriginalPosX", originalPosition.X.Offset)
-        mainWindow:SetAttribute("OriginalPosY", originalPosition.Y.Offset)
-        
-        -- Hide chat elements
-        for _, child in pairs(mainWindow:GetChildren()) do
-            if child ~= titleBar then
-                child.Visible = false
-            end
-        end
-        
-        -- Minimize animation
-        TweenService:Create(mainWindow, TweenInfo.new(0.3), {
-            Size = minimizedSize,
-            Position = UDim2.new(1, -310, 1, -50)
-        }):Play()
-        
-        -- Change minimize button to restore button
-        minimizeButton.Text = "□"
-        
-        -- Change minimize button function to restore
-        local oldClick = minimizeButton.MouseButton1Click:Connect(function() end)
-        oldClick:Disconnect()
-        
-        minimizeButton.MouseButton1Click:Connect(function()
+    -- Enhanced minimize/restore functionality
+    local isMinimized = false
+    local originalSize = mainWindow.Size
+    local originalPosition = mainWindow.Position
+    local minimizedSize = UDim2.new(0, 300, 0, 40)
+    local minimizedPosition = UDim2.new(1, -310, 1, -50)
+    
+    local function toggleMinimize()
+        if isMinimized then
             -- Restore window
-            for _, child in pairs(mainWindow:GetChildren()) do
-                child.Visible = true
-            end
-            
-            -- Restore animation
-            TweenService:Create(mainWindow, TweenInfo.new(0.3), {
-                Size = UDim2.new(0, mainWindow:GetAttribute("OriginalSizeX"), 0, mainWindow:GetAttribute("OriginalSizeY")),
-                Position = UDim2.new(0.5, -mainWindow:GetAttribute("OriginalSizeX")/2, 0.5, -mainWindow:GetAttribute("OriginalSizeY")/2)
-            }):Play()
-            
-            -- Change back to minimize button
+            isMinimized = false
             minimizeButton.Text = "−"
             
-            -- Reset click handler
-            local restoreClick = minimizeButton.MouseButton1Click:Connect(function() end)
-            restoreClick:Disconnect()
+            -- Show all hidden elements
+            for _, child in pairs(mainWindow:GetChildren()) do
+                if child ~= titleBar then
+                    child.Visible = true
+                end
+            end
             
-            minimizeButton.MouseButton1Click:Connect(function()
-                -- This will be replaced when the button is clicked
-                -- We're using this approach to avoid recursive function references
-            end)
-        end)
-    end)
+            -- Restore animations
+            local restoreTween = TweenService:Create(mainWindow, 
+                TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+                Size = originalSize,
+                Position = originalPosition
+            })
+            
+            local shadowTween = TweenService:Create(shadow, 
+                TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+                Size = UDim2.new(1, 8, 1, 8),
+                Position = UDim2.new(0, originalPosition.X.Offset - 4, 0, originalPosition.Y.Offset - 4)
+            })
+            
+            restoreTween:Play()
+            shadowTween:Play()
+        else
+            -- Minimize window
+            isMinimized = true
+            minimizeButton.Text = "□"
+            originalSize = mainWindow.Size
+            originalPosition = mainWindow.Position
+            
+            -- Hide all elements except title bar
+            for _, child in pairs(mainWindow:GetChildren()) do
+                if child ~= titleBar then
+                    child.Visible = false
+                end
+            end
+            
+            -- Minimize animations
+            local minimizeTween = TweenService:Create(mainWindow, 
+                TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+                Size = minimizedSize,
+                Position = minimizedPosition
+            })
+            
+            local shadowTween = TweenService:Create(shadow, 
+                TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+                Size = UDim2.new(0, 308, 0, 48),
+                Position = UDim2.new(1, -314, 1, -54)
+            })
+            
+            minimizeTween:Play()
+            shadowTween:Play()
+        end
+    end
+    
+    minimizeButton.MouseButton1Click:Connect(toggleMinimize)
     
     -- Close button
     local closeButton = Instance.new("TextButton")
@@ -5595,7 +5863,7 @@ function GlobalChat:CreateDesktopInterface(parent, userConfig)
     contentContainer.Size = UDim2.new(1, 0, 1, -50) -- Leave space for title bar
     contentContainer.Position = UDim2.new(0, 0, 0, 50)
     contentContainer.BackgroundColor3 = ThemeManager:GetCurrentTheme().primary
-    contentContainer.BackgroundTransparency = 0.1
+    contentContainer.BackgroundTransparency = 0
     contentContainer.BorderSizePixel = 0
     contentContainer.Parent = mainWindow
     
@@ -5603,47 +5871,92 @@ function GlobalChat:CreateDesktopInterface(parent, userConfig)
     self:AddChatElements(contentContainer, userConfig)
 end
 
--- Add basic chat elements
+-- Enhanced chat elements with better UX
 function GlobalChat:AddChatElements(parent, userConfig)
-    -- Chat area
+    local platform = userConfig.platform or Utils:GetPlatform()
+    local isMobile = platform == "Mobile"
+    
+    -- Chat area with improved styling
     local chatArea = Instance.new("ScrollingFrame")
     chatArea.Name = "ChatArea"
     chatArea.Size = UDim2.new(1, -20, 1, -100)
-    chatArea.Position = UDim2.new(0, 10, 0, 50)
-    chatArea.BackgroundTransparency = 1
+    chatArea.Position = UDim2.new(0, 10, 0, 10)
+    chatArea.BackgroundColor3 = ThemeManager:GetCurrentTheme().secondary
+    chatArea.BackgroundTransparency = 0.1
     chatArea.BorderSizePixel = 0
-    chatArea.ScrollBarThickness = 8
+    chatArea.ScrollBarThickness = isMobile and 12 or 8
     chatArea.ScrollBarImageColor3 = ThemeManager:GetCurrentTheme().accent
+    chatArea.ScrollBarImageTransparency = 0.3
+    chatArea.CanvasSize = UDim2.new(0, 0, 0, 0)
+    chatArea.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    chatArea.ScrollingDirection = Enum.ScrollingDirection.Y
     chatArea.Parent = parent
+    
+    -- Add rounded corners to chat area
+    local chatCorner = Instance.new("UICorner")
+    chatCorner.CornerRadius = UDim.new(0, 8)
+    chatCorner.Parent = chatArea
+    
+    -- Add padding to chat area
+    local chatPadding = Instance.new("UIPadding")
+    chatPadding.PaddingTop = UDim.new(0, 10)
+    chatPadding.PaddingBottom = UDim.new(0, 10)
+    chatPadding.PaddingLeft = UDim.new(0, 10)
+    chatPadding.PaddingRight = UDim.new(0, 10)
+    chatPadding.Parent = chatArea
     
     local chatLayout = Instance.new("UIListLayout")
     chatLayout.SortOrder = Enum.SortOrder.LayoutOrder
     chatLayout.Padding = UDim.new(0, 5)
     chatLayout.Parent = chatArea
     
-    -- Input area
+    -- Enhanced input area with better mobile support
     local inputFrame = Instance.new("Frame")
     inputFrame.Name = "InputFrame"
-    inputFrame.Size = UDim2.new(1, -20, 0, 40)
-    inputFrame.Position = UDim2.new(0, 10, 1, -50)
-    inputFrame.BackgroundTransparency = 1
+    inputFrame.Size = UDim2.new(1, -20, 0, isMobile and 50 or 40)
+    inputFrame.Position = UDim2.new(0, 10, 1, -(isMobile and 60 or 50))
+    inputFrame.BackgroundColor3 = ThemeManager:GetCurrentTheme().secondary
+    inputFrame.BackgroundTransparency = 0.1
+    inputFrame.BorderSizePixel = 0
     inputFrame.Parent = parent
+    
+    local inputFrameCorner = Instance.new("UICorner")
+    inputFrameCorner.CornerRadius = UDim.new(0, 8)
+    inputFrameCorner.Parent = inputFrame
+    
+    -- Input container for better layout
+    local inputContainer = Instance.new("Frame")
+    inputContainer.Name = "InputContainer"
+    inputContainer.Size = UDim2.new(1, -10, 1, -10)
+    inputContainer.Position = UDim2.new(0, 5, 0, 5)
+    inputContainer.BackgroundTransparency = 1
+    inputContainer.Parent = inputFrame
     
     local inputBox = Instance.new("TextBox")
     inputBox.Name = "InputBox"
-    inputBox.Size = UDim2.new(1, -60, 1, 0)
+    inputBox.Size = UDim2.new(1, -(isMobile and 70 or 60), 1, 0)
     inputBox.Position = UDim2.new(0, 0, 0, 0)
-    inputBox.BackgroundColor3 = ThemeManager:GetCurrentTheme().secondary
-    inputBox.BorderSizePixel = 1
-    inputBox.BorderColor3 = ThemeManager:GetCurrentTheme().accent
+    inputBox.BackgroundColor3 = ThemeManager:GetCurrentTheme().primary
+    inputBox.BackgroundTransparency = 0
+    inputBox.BorderSizePixel = 0
     inputBox.Text = ""
     inputBox.PlaceholderText = "Type a message..."
     inputBox.TextColor3 = ThemeManager:GetCurrentTheme().text
     inputBox.PlaceholderColor3 = ThemeManager:GetCurrentTheme().textMuted
-    inputBox.TextSize = 14
+    inputBox.TextSize = isMobile and 16 or 14
     inputBox.Font = Enum.Font.Gotham
     inputBox.TextXAlignment = Enum.TextXAlignment.Left
-    inputBox.Parent = inputFrame
+    inputBox.TextWrapped = true
+    inputBox.ClearTextOnFocus = false
+    inputBox.Parent = inputContainer
+    
+    -- Add padding to input box
+    local inputPadding = Instance.new("UIPadding")
+    inputPadding.PaddingLeft = UDim.new(0, 10)
+    inputPadding.PaddingRight = UDim.new(0, 10)
+    inputPadding.PaddingTop = UDim.new(0, 5)
+    inputPadding.PaddingBottom = UDim.new(0, 5)
+    inputPadding.Parent = inputBox
     
     local inputCorner = Instance.new("UICorner")
     inputCorner.CornerRadius = UDim.new(0, 6)
@@ -5651,19 +5964,34 @@ function GlobalChat:AddChatElements(parent, userConfig)
     
     local sendButton = Instance.new("TextButton")
     sendButton.Name = "SendButton"
-    sendButton.Size = UDim2.new(0, 50, 1, 0)
-    sendButton.Position = UDim2.new(1, -50, 0, 0)
+    sendButton.Size = UDim2.new(0, isMobile and 60 or 50, 1, 0)
+    sendButton.Position = UDim2.new(1, -(isMobile and 60 or 50), 0, 0)
     sendButton.BackgroundColor3 = ThemeManager:GetCurrentTheme().accent
     sendButton.BorderSizePixel = 0
-    sendButton.Text = "Send"
+    sendButton.Text = isMobile and "📤" or "Send"
     sendButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-    sendButton.TextSize = 14
+    sendButton.TextSize = isMobile and 18 or 14
     sendButton.Font = Enum.Font.GothamBold
-    sendButton.Parent = inputFrame
+    sendButton.Parent = inputContainer
     
     local sendCorner = Instance.new("UICorner")
     sendCorner.CornerRadius = UDim.new(0, 6)
     sendCorner.Parent = sendButton
+    
+    -- Add hover effects for desktop
+    if not isMobile then
+        sendButton.MouseEnter:Connect(function()
+            TweenService:Create(sendButton, TweenInfo.new(0.2), {
+                BackgroundTransparency = 0.1
+            }):Play()
+        end)
+        
+        sendButton.MouseLeave:Connect(function()
+            TweenService:Create(sendButton, TweenInfo.new(0.2), {
+                BackgroundTransparency = 0
+            }):Play()
+        end)
+    end
     
     -- Send message functionality
     local function sendMessage()
@@ -5713,36 +6041,62 @@ function GlobalChat:AddChatElements(parent, userConfig)
         timestamp = os.time(),
         type = Config.MESSAGE_TYPES.SYSTEM
     })
+    
+    -- Debug: Add a test message to verify UI is working
+    self:AddMessageToChat(chatArea, {
+        id = "test",
+        content = "UI is now working properly! You should see this message and be able to type in the input box below.",
+        username = "Debug",
+        timestamp = os.time(),
+        type = Config.MESSAGE_TYPES.NORMAL
+    })
+    
+    print("✅ Chat elements added successfully to:", parent.Name)
 end
 
--- Add message to chat area
+-- Enhanced message display with better formatting
 function GlobalChat:AddMessageToChat(chatArea, messageData)
     local messageFrame = Instance.new("Frame")
     messageFrame.Name = "Message_" .. messageData.id
     messageFrame.Size = UDim2.new(1, 0, 0, 0)
-    messageFrame.BackgroundTransparency = 1
+    messageFrame.BackgroundColor3 = ThemeManager:GetCurrentTheme().secondary
+    messageFrame.BackgroundTransparency = 0.3
+    messageFrame.BorderSizePixel = 0
     messageFrame.LayoutOrder = #chatArea:GetChildren()
     messageFrame.Parent = chatArea
     
+    -- Add rounded corners to message
+    local messageCorner = Instance.new("UICorner")
+    messageCorner.CornerRadius = UDim.new(0, 6)
+    messageCorner.Parent = messageFrame
+    
+    -- Add padding to message
+    local messagePadding = Instance.new("UIPadding")
+    messagePadding.PaddingTop = UDim.new(0, 8)
+    messagePadding.PaddingBottom = UDim.new(0, 8)
+    messagePadding.PaddingLeft = UDim.new(0, 12)
+    messagePadding.PaddingRight = UDim.new(0, 12)
+    messagePadding.Parent = messageFrame
+    
     local messageLayout = Instance.new("UIListLayout")
     messageLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    messageLayout.Padding = UDim.new(0, 2)
+    messageLayout.Padding = UDim.new(0, 4)
     messageLayout.Parent = messageFrame
     
-    -- Username and timestamp
+    -- Enhanced header with better styling
     local headerLabel = Instance.new("TextLabel")
     headerLabel.Name = "Header"
-    headerLabel.Size = UDim2.new(1, 0, 0, 20)
+    headerLabel.Size = UDim2.new(1, 0, 0, 18)
     headerLabel.BackgroundTransparency = 1
-    headerLabel.Text = messageData.username .. " • " .. Utils:FormatTimestamp(messageData.timestamp)
+    headerLabel.Text = messageData.username .. " • " .. (Utils.FormatTimestamp and Utils:FormatTimestamp(messageData.timestamp) or os.date("%H:%M", messageData.timestamp))
     headerLabel.TextColor3 = ThemeManager:GetCurrentTheme().textMuted
-    headerLabel.TextSize = 12
-    headerLabel.Font = Enum.Font.Gotham
+    headerLabel.TextSize = 11
+    headerLabel.Font = Enum.Font.GothamMedium
     headerLabel.TextXAlignment = Enum.TextXAlignment.Left
     headerLabel.LayoutOrder = 1
     headerLabel.Parent = messageFrame
     
-    -- Message content
+    -- Enhanced message content with proper text wrapping
     local contentLabel = Instance.new("TextLabel")
     contentLabel.Name = "Content"
     contentLabel.Size = UDim2.new(1, 0, 0, 0)
@@ -5750,25 +6104,28 @@ function GlobalChat:AddMessageToChat(chatArea, messageData)
     contentLabel.Text = messageData.content
     contentLabel.TextColor3 = messageData.type == Config.MESSAGE_TYPES.SYSTEM and ThemeManager:GetCurrentTheme().accent or ThemeManager:GetCurrentTheme().text
     contentLabel.TextSize = 14
-    contentLabel.Font = Enum.Font.Gotham
+    contentLabel.Font = messageData.type == Config.MESSAGE_TYPES.SYSTEM and Enum.Font.GothamMedium or Enum.Font.Gotham
     contentLabel.TextXAlignment = Enum.TextXAlignment.Left
     contentLabel.TextYAlignment = Enum.TextYAlignment.Top
     contentLabel.TextWrapped = true
+    contentLabel.AutomaticSize = Enum.AutomaticSize.Y
     contentLabel.LayoutOrder = 2
     contentLabel.Parent = messageFrame
     
-    -- Calculate text height
-    local textBounds = Utils:GetTextSize(messageData.content, contentLabel.Font, contentLabel.TextSize, chatArea.AbsoluteSize.X - 20)
-    contentLabel.Size = UDim2.new(1, 0, 0, textBounds.Y)
+    -- Auto-resize message frame
+    messageFrame.AutomaticSize = Enum.AutomaticSize.Y
     
-    -- Update message frame size
-    messageFrame.Size = UDim2.new(1, 0, 0, 25 + textBounds.Y)
-    
-    -- Update canvas size
-    messageLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-        chatArea.CanvasSize = UDim2.new(0, 0, 0, messageLayout.AbsoluteContentSize.Y)
-        chatArea.CanvasPosition = Vector2.new(0, messageLayout.AbsoluteContentSize.Y)
+    -- Scroll to bottom when new message is added
+    spawn(function()
+        wait(0.1) -- Wait for layout to update
+        chatArea.CanvasPosition = Vector2.new(0, chatArea.AbsoluteCanvasSize.Y)
     end)
+    
+    -- Add subtle animation for new messages
+    contentLabel.TextTransparency = 1
+    TweenService:Create(contentLabel, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
+        TextTransparency = 0
+    }):Play()
 end
 
 -- Show notification
@@ -5846,23 +6203,41 @@ function GlobalChat:StartSetupProcess(loadingGui)
     local existingConfig = UserManager:GetUserConfig()
     local authToken = UserManager:GetAuthToken()
     
-    if existingConfig and existingConfig.setupComplete and authToken then
-        -- User has completed setup and is authenticated, load directly
-        loadingGui:Destroy()
-        self:LoadChatInterface(existingConfig)
-    else
-        -- Start setup flow: Platform → Country → Language → Authentication
-        loadingGui:Destroy()
-        self:ShowPlatformSelection()
+    print("🔍 Checking existing setup...")
+    print("📋 Existing config:", existingConfig and "Found" or "None")
+    if existingConfig then
+        print("   - setupComplete:", existingConfig.setupComplete)
+        print("   - country:", existingConfig.country)
+        print("   - language:", existingConfig.language)
     end
+    print("🔑 Auth token:", authToken and "Found" or "None")
+    
+    -- For debugging: Force setup flow (comment out when not needed)
+    UserManager:ClearUserData()
+    existingConfig = nil
+    authToken = nil
+    print("🔄 Forced setup flow - cleared all user data")
+    
+    print("🔍 Debug values:")
+    print("   existingConfig:", existingConfig)
+    print("   authToken:", authToken)
+    
+    -- FORCE SETUP FLOW - BYPASS ALL CONDITIONS
+    print("🆕 FORCING setup flow...")
+    loadingGui:Destroy()
+    self:ShowPlatformSelection()
 end
 
 --- Show platform selection screen
 function GlobalChat:ShowPlatformSelection()
+    print("🖥️ Showing platform selection screen...")
+    
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "GlobalChatPlatformSelection"
     screenGui.ResetOnSpawn = false
     screenGui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+    
+    print("✅ Platform selection ScreenGui created successfully")
 
     -- Main container - Smaller, centered positioning
     local mainFrame = Instance.new("Frame")
@@ -5872,6 +6247,8 @@ function GlobalChat:ShowPlatformSelection()
     mainFrame.BackgroundColor3 = ThemeManager:GetCurrentTheme().primary
     mainFrame.BorderSizePixel = 0
     mainFrame.Parent = screenGui
+    
+    print("✅ Platform selection main frame created")
 
     -- Add corner radius
     local corner = Instance.new("UICorner")
@@ -6029,19 +6406,24 @@ function GlobalChat:ShowPlatformSelection()
 
     addHoverEffect(mobileButton)
     addHoverEffect(pcButton)
+    
+    print("✅ Platform selection buttons created and configured")
 
     -- Add entrance animation (scale instead of position)
     mainFrame.Size = UDim2.new(0, 0, 0, 0)
     mainFrame.BackgroundTransparency = 1
     
     local entranceTween = TweenService:Create(mainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-        Size = UDim2.new(0, 500, 0, 400),
+        Size = UDim2.new(0, 350, 0, 280),
         BackgroundTransparency = 0
     })
     entranceTween:Play()
+    
+    print("🎬 Platform selection entrance animation started")
 
     -- Event handlers
     mobileButton.MouseButton1Click:Connect(function()
+        print("📱 Mobile button clicked!")
         UserManager:SetUserPlatform("Mobile")
         
         -- Exit animation (scale instead of position)
@@ -6057,6 +6439,7 @@ function GlobalChat:ShowPlatformSelection()
     end)
 
     pcButton.MouseButton1Click:Connect(function()
+        print("💻 PC button clicked!")
         UserManager:SetUserPlatform("PC")
         
         -- Exit animation (scale instead of position)
@@ -6074,6 +6457,8 @@ end
 
 --- Show country selection screen
 function GlobalChat:ShowCountrySelectionScreen()
+    print("🌍 Showing country selection screen...")
+    
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "GlobalChatCountrySelection"
     screenGui.ResetOnSpawn = false
@@ -6739,6 +7124,10 @@ end
 
 -- Load chat interface
 function GlobalChat:LoadChatInterface(userConfig)
+    print("🚨 LoadChatInterface called! This should NOT happen during setup!")
+    print("🔍 Stack trace:")
+    print(debug.traceback())
+    
     if not userConfig then
         userConfig = {
             platform = self:DetectPlatform(),
@@ -6779,6 +7168,8 @@ end
 
 -- Show authentication screen
 function GlobalChat:ShowAuthenticationScreen()
+    print("🔐 Showing authentication screen...")
+    
     -- Check for saved credentials first
     local savedCredentials = UserManager:GetSavedCredentials()
     if savedCredentials then
@@ -7229,9 +7620,58 @@ function GlobalChat:Cleanup()
     if RateLimiter and RateLimiter.Cleanup then RateLimiter:Cleanup() end
     if EmojiManager and EmojiManager.Cleanup then EmojiManager:Cleanup() end
     if UserManager and UserManager.Cleanup then UserManager:Cleanup() end
+    if ThemeManager and ThemeManager.Cleanup then ThemeManager:Cleanup() end
     if Utils and Utils.Cleanup then Utils:Cleanup() end
     
+    -- Cleanup all event connections
+    self:CleanupConnections()
+    
+    -- Remove all GUIs
+    local playerGui = Players.LocalPlayer:FindFirstChild("PlayerGui")
+    if playerGui then
+        local chatGui = playerGui:FindFirstChild("GlobalChatInterface")
+        if chatGui then
+            chatGui:Destroy()
+        end
+        
+        local setupGui = playerGui:FindFirstChild("GlobalChatSetup")
+        if setupGui then
+            setupGui:Destroy()
+        end
+        
+        local loadingGui = playerGui:FindFirstChild("GlobalChatLoading")
+        if loadingGui then
+            loadingGui:Destroy()
+        end
+    end
+    
     print("✅ Shutdown complete")
+end
+
+function GlobalChat:CleanupConnections()
+    -- Store all connections for proper cleanup
+    if not self.connections then
+        self.connections = {}
+    end
+    
+    -- Disconnect all stored connections
+    for _, connection in pairs(self.connections) do
+        if connection and connection.Connected then
+            connection:Disconnect()
+        end
+    end
+    
+    self.connections = {}
+end
+
+function GlobalChat:AddConnection(connection)
+    -- Store connection for cleanup
+    if not self.connections then
+        self.connections = {}
+    end
+    
+    table.insert(self.connections, connection)
+    return connection
 end
 
 -- Store modules for external access
