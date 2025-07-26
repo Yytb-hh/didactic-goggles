@@ -6212,20 +6212,17 @@ function GlobalChat:StartSetupProcess(loadingGui)
     end
     print("🔑 Auth token:", authToken and "Found" or "None")
     
-    -- For debugging: Force setup flow (comment out when not needed)
-    UserManager:ClearUserData()
-    existingConfig = nil
-    authToken = nil
-    print("🔄 Forced setup flow - cleared all user data")
-    
-    print("🔍 Debug values:")
-    print("   existingConfig:", existingConfig)
-    print("   authToken:", authToken)
-    
-    -- FORCE SETUP FLOW - BYPASS ALL CONDITIONS
-    print("🆕 FORCING setup flow...")
-    loadingGui:Destroy()
-    self:ShowPlatformSelection()
+    if existingConfig and existingConfig.setupComplete == true and authToken then
+        -- User has completed setup and is authenticated, load directly
+        print("✅ User already set up, loading chat interface...")
+        loadingGui:Destroy()
+        self:LoadChatInterface(existingConfig)
+    else
+        -- Start setup flow: Platform → Country → Language → Authentication
+        print("🆕 Starting setup flow...")
+        loadingGui:Destroy()
+        self:ShowPlatformSelection()
+    end
 end
 
 --- Show platform selection screen
@@ -6254,59 +6251,6 @@ function GlobalChat:ShowPlatformSelection()
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(0, 12)
     corner.Parent = mainFrame
-
-    -- Make window draggable
-    local dragging = false
-    local dragInput
-    local dragStart
-    local startPos
-    
-    local function updateDrag(input)
-        if not dragging then return end
-        
-        local delta = input.Position - dragStart
-        local newPosition = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-        
-        -- Clamp position to screen bounds
-        local screenSize = GuiService:GetScreenResolution()
-        local windowSize = mainFrame.AbsoluteSize
-        
-        local minX = 0
-        local maxX = screenSize.X - windowSize.X
-        local minY = 0
-        local maxY = screenSize.Y - windowSize.Y
-        
-        local newX = math.clamp(newPosition.X.Offset, minX, maxX)
-        local newY = math.clamp(newPosition.Y.Offset, minY, maxY)
-        
-        mainFrame.Position = UDim2.new(newPosition.X.Scale, newX, newPosition.Y.Scale, newY)
-    end
-    
-    headerFrame.InputBegan:Connect(function(input)
-        if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
-            dragging = true
-            dragStart = input.Position
-            startPos = mainFrame.Position
-            
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
-            end)
-        end
-    end)
-    
-    headerFrame.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-            dragInput = input
-        end
-    end)
-    
-    UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and dragging then
-            updateDrag(input)
-        end
-    end)
 
     -- Close button
     local closeButton = Instance.new("TextButton")
@@ -7124,10 +7068,6 @@ end
 
 -- Load chat interface
 function GlobalChat:LoadChatInterface(userConfig)
-    print("🚨 LoadChatInterface called! This should NOT happen during setup!")
-    print("🔍 Stack trace:")
-    print(debug.traceback())
-    
     if not userConfig then
         userConfig = {
             platform = self:DetectPlatform(),
